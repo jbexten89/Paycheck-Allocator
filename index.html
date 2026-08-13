@@ -1024,15 +1024,8 @@ function confirmDialog(message, onYes) {
 route('dashboard', (root) => {
   let offset = 0;
   const render = () => {
-  // Build a wide range of pay dates surrounding today so we can step ± from "next".
-  const stepDays = { weekly: 7, biweekly: 14, triweekly: 21 }[State.frequency];
-  let payDates;
-  if (stepDays) {
-    const anchor = addDays(parseISO(State.payStart), -52 * stepDays);
-    payDates = generatePayDates(anchor, 156, State.frequency);
-  } else {
-    payDates = generatePayDates(parseISO(State.payStart), 60, State.frequency);
-  }
+  // Forward-only from payStart to match Pay Schedule cycle counts.
+  const payDates = generatePayDates(parseISO(State.payStart), 156, State.frequency);
   const { perPaycheck } = computeAllocations(State.bills, payDates);
   const today = new Date(); today.setHours(0,0,0,0);
   let nextIdx = perPaycheck.findIndex((p) => p.payDate >= today);
@@ -1568,21 +1561,8 @@ function openBillEditor(id) {
 route('schedule', (root) => {
   const render = () => {
     const count = State.schedCount;
-    // Use the same wide date range as the dashboard so cycle counts agree.
-    const stepDays = { weekly: 7, biweekly: 14, triweekly: 21 }[State.frequency];
-    let allDates;
-    if (stepDays) {
-      const anchor = addDays(parseISO(State.payStart), -52 * stepDays);
-      allDates = generatePayDates(anchor, 156, State.frequency);
-    } else {
-      allDates = generatePayDates(parseISO(State.payStart), 60, State.frequency);
-    }
-    const { perPaycheck: allPer } = computeAllocations(State.bills, allDates);
-    // Show only pay dates >= today, up to `count`.
-    const today = new Date(); today.setHours(0,0,0,0);
-    const startIdx = allPer.findIndex((p) => p.payDate >= today);
-    const from = startIdx === -1 ? 0 : startIdx;
-    const perPaycheck = allPer.slice(from, from + count);
+    const payDates = State.paySchedule(count);
+    const { perPaycheck } = computeAllocations(State.bills, payDates);
     const activeBills = State.bills.filter((b) => b.amount > 0);
     const billOrder = activeBills.slice().sort((a,b)=>a.dueDay-b.dueDay);
     // group by category, ordered
