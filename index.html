@@ -11,6 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
     /* Light mode (kept understated; dark is the primary look) */
@@ -514,6 +515,13 @@
    Paycheck Allocator — vanilla JS
    ========================================================================= */
 
+/* ------------------------- Supabase config ------------------------- */
+const SUPABASE_URL = 'https://coqestfkjjhztdmorgbo.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvcWVzdGZrampoenRkbW9yZ2JvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2NTM1NzMsImV4cCI6MjEwMjIyOTU3M30.HWFpprcVD-O2WnlOQgTJJe6ao7jhEucvLXjE2VAY6Bs';
+const sb = (typeof supabase !== 'undefined')
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
+  : null;
+
 const STORE = {
   bills: 'paycheck_allocator.bills',
   payStart: 'paycheck_allocator.pay_start',
@@ -967,6 +975,112 @@ const State = {
   },
   paySchedule(count = 26) {
     return generatePayDates(parseISO(this.payStart), count, this.frequency);
+  }
+};
+
+/* ------------------------- Supabase sync ------------------------- */
+const Sync = {
+  user: null,
+  status: 'offline',     // 'offline' | 'signed-out' | 'syncing' | 'synced' | 'error'
+  lastError: null,
+  pushTimer: null,
+  listeners: new Set(),
+  on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+  emit() { for (const fn of this.listeners) fn(); },
+  setStatus(s, err) { this.status = s; this.lastError = err || null; this.emit(); },
+
+  payloadFromState() {
+    return {
+      bills: State.bills,
+      payStart: State.payStart,
+      frequency: State.frequency,
+      theme: State.theme,
+      catOrder: State.catOrder,
+      billOrder: State.billOrder,
+      schedCount: State.schedCount,
+      payAmount: State.payAmount,
+      collapsedCats: [...State.collapsedCats],
+      showZeroBills: State.showZeroBills
+    };
+  },
+  applyPayload(p) {
+    if (!p || typeof p !== 'object') return;
+    if (Array.isArray(p.bills)) { State.bills = p.bills; localStorage.setItem(STORE.bills, JSON.stringify(p.bills)); }
+    if (p.payStart) { State.payStart = p.payStart; localStorage.setItem(STORE.payStart, p.payStart); }
+    if (p.frequency) { State.frequency = p.frequency; localStorage.setItem(STORE.freq, p.frequency); }
+    if (p.theme) { State.setTheme(p.theme); }
+    if (Array.isArray(p.catOrder)) { State.setCatOrder(p.catOrder); }
+    if (Array.isArray(p.billOrder)) { State.setBillOrder(p.billOrder); }
+    if (typeof p.schedCount === 'number') { State.setSchedCount(p.schedCount); }
+    if (typeof p.payAmount === 'number') { State.setPayAmount(p.payAmount); }
+    if (Array.isArray(p.collapsedCats)) { State.collapsedCats = new Set(p.collapsedCats); State.persistCollapsed(); }
+    if (typeof p.showZeroBills === 'boolean') { State.setShowZeroBills(p.showZeroBills); }
+    localStorage.setItem(STORE.seeded, '1');
+  },
+
+  async init() {
+    if (!sb) { this.setStatus('offline'); return; }
+    const { data } = await sb.auth.getSession();
+    if (data.session) {
+      this.user = data.session.user;
+      await this.pullOrPush();
+    } else {
+      this.setStatus('signed-out');
+    }
+    sb.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        this.user = session.user;
+        await this.pullOrPush();
+        navigate();
+      } else if (event === 'SIGNED_OUT') {
+        this.user = null;
+        this.setStatus('signed-out');
+        navigate();
+      }
+    });
+    window.addEventListener('online', () => { if (this.user) this.push(); });
+  },
+  async signIn(email) {
+    if (!sb) throw new Error('Supabase not loaded');
+    const { error } = await sb.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: location.href.split('#')[0] }
+    });
+    if (error) throw error;
+  },
+  async signOut() { if (sb) await sb.auth.signOut(); },
+  async pullOrPush() {
+    if (!sb || !this.user) return;
+    this.setStatus('syncing');
+    try {
+      const { data, error } = await sb.from('paycheck_data').select('payload,updated_at').maybeSingle();
+      if (error) throw error;
+      if (data && data.payload && Array.isArray(data.payload.bills) && data.payload.bills.length > 0) {
+        this.applyPayload(data.payload);
+        this.setStatus('synced');
+      } else {
+        await this._pushNow();
+      }
+    } catch (e) { this.setStatus('error', e.message); }
+  },
+  push() {
+    if (!sb || !this.user) return;
+    if (!navigator.onLine) { this.setStatus('offline'); return; }
+    clearTimeout(this.pushTimer);
+    this.pushTimer = setTimeout(() => this._pushNow(), 800);
+  },
+  async _pushNow() {
+    if (!sb || !this.user) return;
+    this.setStatus('syncing');
+    try {
+      const { error } = await sb.from('paycheck_data').upsert({
+        user_id: this.user.id,
+        payload: this.payloadFromState(),
+        updated_at: new Date().toISOString()
+      });
+      if (error) throw error;
+      this.setStatus('synced');
+    } catch (e) { this.setStatus('error', e.message); }
   }
 };
 
@@ -1709,6 +1823,23 @@ route('settings', (root) => {
         </div>
       </div>
       <div class="card">
+        <h2>Sync (cloud backup)</h2>
+        ${
+          Sync.user
+            ? `<div style="font-size:13px; color:var(--ink); margin-bottom:8px;">Signed in as <strong>${escapeHtml(Sync.user.email || Sync.user.id)}</strong></div>
+               <div class="row">
+                 <button class="btn" id="sync-now">Sync now</button>
+                 <button class="btn btn-danger" id="sync-signout">Sign out</button>
+               </div>`
+            : `<label>Email</label>
+               <input id="sync-email" type="email" placeholder="you@example.com" style="margin-bottom:8px;" />
+               <button class="btn btn-primary" id="sync-signin">Send magic link</button>`
+        }
+        <div class="hint" style="margin-top:10px; color:var(--ink-muted); font-size:12px;">
+          Status: <span id="sync-status">${Sync.status}${Sync.lastError ? ` (${escapeHtml(Sync.lastError)})` : ''}</span>
+        </div>
+      </div>
+      <div class="card">
         <h2>Data</h2>
         <div class="row">
           <button class="btn" id="export">Export JSON</button>
@@ -1745,6 +1876,29 @@ route('settings', (root) => {
   $('#pay-amount').onchange = (e) => { State.setPayAmount(parseFloat(e.target.value) || 0); };
   $('#theme').onchange = (e) => { State.setTheme(e.target.value); };
   $('#show-zero').onchange = (e) => { State.setShowZeroBills(e.target.checked); };
+
+  const signinBtn = $('#sync-signin');
+  if (signinBtn) signinBtn.onclick = async () => {
+    const email = ($('#sync-email').value || '').trim();
+    if (!email) { alert('Enter your email'); return; }
+    signinBtn.disabled = true;
+    signinBtn.textContent = 'Sending…';
+    try {
+      await Sync.signIn(email);
+      alert('Check ' + email + ' for a magic link. Click it on this device to sign in.');
+    } catch (e) {
+      alert('Sign-in failed: ' + e.message);
+    } finally {
+      signinBtn.disabled = false;
+      signinBtn.textContent = 'Send magic link';
+    }
+  };
+  const signoutBtn = $('#sync-signout');
+  if (signoutBtn) signoutBtn.onclick = async () => {
+    await Sync.signOut();
+  };
+  const syncNowBtn = $('#sync-now');
+  if (syncNowBtn) syncNowBtn.onclick = () => Sync._pushNow();
 
   $('#export').onclick = () => {
     const blob = new Blob([JSON.stringify({ bills: State.bills, payStart: State.payStart, frequency: State.frequency }, null, 2)], { type: 'application/json' });
@@ -1963,6 +2117,16 @@ function runTests(log) {
 
 /* ------------------------- Boot ------------------------- */
 State.load();
+
+// Wire State mutations to trigger Supabase push (debounced inside Sync.push).
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','persistCollapsed'].forEach((k) => {
+  if (typeof State[k] !== 'function') return;
+  const orig = State[k].bind(State);
+  State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
+});
+Sync.on(() => { const el = document.getElementById('sync-status'); if (el) el.textContent = Sync.status + (Sync.lastError ? ` (${Sync.lastError})` : ''); });
+Sync.init();
+
 navigate();
 
 /* PWA service worker (only over http(s)) */
