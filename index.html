@@ -695,7 +695,6 @@ function computeAllocations(bills, payDates) {
     let runningBalance = Number(bill.initialSaved || 0);
     let cycleIndex = 0;          // 0 = first cycle (uses initialSaved), 1+ subsequent
     let lastDueKey = null;       // used to detect crossing into a new cycle
-    let payIdxInCycle = 0;       // 1-based position within current cycle for this bill
 
     // If the bill has an anchor-based recurrence and its anchor date is before the
     // first pay date in the schedule, treat that anchor's due as already resolved
@@ -714,12 +713,10 @@ function computeAllocations(bills, payDates) {
 
       // Detect new cycle: if D differs from previously-tracked D, the previous due passed.
       const dueKey = toISO(D);
-      if (lastDueKey !== dueKey) {
-        // new cycle
-        if (lastDueKey !== null) { runningBalance = 0; cycleIndex++; }
-        payIdxInCycle = 1;
-      } else {
-        payIdxInCycle++;
+      if (lastDueKey !== null && lastDueKey !== dueKey) {
+        // previous cycle's due date has passed; reset balance to 0 for next cycle
+        runningBalance = 0;
+        cycleIndex++;
       }
       lastDueKey = dueKey;
 
@@ -747,8 +744,7 @@ function computeAllocations(bills, payDates) {
         amount: perPay,
         runningBalance,
         dueDate: D,
-        paychecksInCycle: cycleCount,
-        payIdxInCycle
+        paychecksInCycle: cycleCount
       };
       perPaycheck[i].items.push(item);
       perPaycheck[i].total += perPay;
@@ -1253,22 +1249,16 @@ route('dashboard', (root) => {
                 // Build list of bills to render.
                 let billsToRender;
                 if (State.showZeroBills) {
-                  billsToRender = State.bills.filter((b) => b.amount > 0).map((b) => {
-                    const it = itemByBillId.get(b.id) || {};
-                    return {
-                      billId: b.id,
-                      name: b.name,
-                      dueDate: it.dueDate,
-                      amount: it.amount || 0,
-                      payIdxInCycle: it.payIdxInCycle,
-                      paychecksInCycle: it.paychecksInCycle,
-                      category: catFor(b)
-                    };
-                  });
+                  billsToRender = State.bills.filter((b) => b.amount > 0).map((b) => ({
+                    billId: b.id,
+                    name: b.name,
+                    dueDate: (itemByBillId.get(b.id) || {}).dueDate,
+                    amount: (itemByBillId.get(b.id) || {}).amount || 0,
+                    category: catFor(b)
+                  }));
                 } else {
                   billsToRender = nextItems.map((it) => ({
                     billId: it.billId, name: it.name, dueDate: it.dueDate, amount: it.amount,
-                    payIdxInCycle: it.payIdxInCycle, paychecksInCycle: it.paychecksInCycle,
                     category: catFor(State.bills.find((x) => x.id === it.billId) || {})
                   }));
                 }
@@ -1293,17 +1283,16 @@ route('dashboard', (root) => {
                     <tr${it.amount === 0 ? ' class="row-muted"' : ''}>
                       <td>${escapeHtml(it.name)}</td>
                       <td>${it.dueDate ? fmtDateShort.format(it.dueDate) : '—'}</td>
-                      <td>${it.payIdxInCycle && it.paychecksInCycle ? `${it.payIdxInCycle} of ${it.paychecksInCycle}` : '—'}</td>
                       <td class="total">${fmtUSD.format(it.amount)}</td>
                     </tr>
                   `).join('');
                   return header + rows;
                 }).join('');
                 return `<div style="overflow-x:auto;"><table class="schedule" style="min-width:0;">
-                  <thead><tr><th>Bill</th><th>Due</th><th>Pay</th><th>Allocate</th></tr></thead>
+                  <thead><tr><th>Bill</th><th>Due</th><th>Allocate</th></tr></thead>
                   <tbody>
                     ${rowsHtml}
-                    <tr class="sched-grand-total"><td colspan="3" style="text-align:right;">Total</td><td class="total">${fmtUSD.format(next ? next.total : 0)}</td></tr>
+                    <tr class="sched-grand-total"><td colspan="2" style="text-align:right;">Total</td><td class="total">${fmtUSD.format(next ? next.total : 0)}</td></tr>
                   </tbody>
                 </table></div>`;
               })()
