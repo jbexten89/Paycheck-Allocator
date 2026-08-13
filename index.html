@@ -264,9 +264,18 @@
   .sched-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
   tr.sched-cat-header td {
     background: var(--paper);
-    padding: 6px 12px !important;
+    padding: 6px 0 !important;
     border-bottom: 1px solid var(--hairline);
     text-align: left !important;
+    position: relative;
+  }
+  tr.sched-cat-header .cat-header-inner {
+    position: sticky;
+    left: 12px;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 10px;
+    padding-right: 12px;
   }
   tr.sched-cat-header .cat-name {
     font-family: var(--sans); font-size: 11px; font-weight: 600;
@@ -1158,8 +1167,10 @@ route('schedule', (root) => {
                   const catHeader = `
                     <tr class="sched-cat-header">
                       <td colspan="${colCount}">
-                        <span class="cat-name">${escapeHtml(cat)}</span>
-                        <span class="cat-meta">${bills.length} bill${bills.length === 1 ? '' : 's'} · ${fmtUSD.format(catGrandTotal)}</span>
+                        <span class="cat-header-inner">
+                          <span class="cat-name">${escapeHtml(cat)}</span>
+                          <span class="cat-meta">${bills.length} bill${bills.length === 1 ? '' : 's'} · ${fmtUSD.format(catGrandTotal)}</span>
+                        </span>
                       </td>
                     </tr>
                   `;
