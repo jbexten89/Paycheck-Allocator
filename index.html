@@ -556,7 +556,8 @@ const STORE = {
   schedCount: 'paycheck_allocator.sched_count',
   payAmount: 'paycheck_allocator.pay_amount',
   collapsedCats: 'paycheck_allocator.collapsed_cats',
-  showZeroBills: 'paycheck_allocator.show_zero_bills'
+  showZeroBills: 'paycheck_allocator.show_zero_bills',
+  skipLastOfThree: 'paycheck_allocator.skip_last_of_three'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -698,6 +699,7 @@ function computeAllocations(bills, payDates) {
     let runningBalance = Number(bill.initialSaved || 0);
     let cycleIndex = 0;          // 0 = first cycle (uses initialSaved), 1+ subsequent
     let lastDueKey = null;       // used to detect crossing into a new cycle
+    let payIdxInCycle = 0;       // 1-based position within current cycle
 
     // If the bill has an anchor-based recurrence and its anchor date is before the
     // first pay date in the schedule, treat that anchor's due as already resolved
@@ -716,10 +718,11 @@ function computeAllocations(bills, payDates) {
 
       // Detect new cycle: if D differs from previously-tracked D, the previous due passed.
       const dueKey = toISO(D);
-      if (lastDueKey !== null && lastDueKey !== dueKey) {
-        // previous cycle's due date has passed; reset balance to 0 for next cycle
-        runningBalance = 0;
-        cycleIndex++;
+      if (lastDueKey !== dueKey) {
+        if (lastDueKey !== null) { runningBalance = 0; cycleIndex++; }
+        payIdxInCycle = 1;
+      } else {
+        payIdxInCycle++;
       }
       lastDueKey = dueKey;
 
@@ -736,7 +739,14 @@ function computeAllocations(bills, payDates) {
       const baseAmount = cycleIndex === 0
         ? Math.max(0, Number(bill.amount) - Number(bill.initialSaved || 0))
         : Number(bill.amount);
-      const perPay = baseAmount / cycleCount;
+      // Optional: for 3-paycheck cycles, spread over first 2 only (last pay = 0)
+      const skip3 = State.skipLastOfThree && cycleCount === 3;
+      let perPay;
+      if (skip3) {
+        perPay = (payIdxInCycle === 3) ? 0 : baseAmount / 2;
+      } else {
+        perPay = baseAmount / cycleCount;
+      }
 
       runningBalance += perPay;
 
@@ -916,6 +926,7 @@ const State = {
     try { this.collapsedCats = new Set(JSON.parse(localStorage.getItem(STORE.collapsedCats) || '[]')); }
     catch { this.collapsedCats = new Set(); }
     this.showZeroBills = localStorage.getItem(STORE.showZeroBills) === '1';
+    this.skipLastOfThree = localStorage.getItem(STORE.skipLastOfThree) === '1';
     if (!localStorage.getItem(STORE.seeded)) {
       this.bills = defaultMonthlyBills();
       localStorage.setItem(STORE.seeded, '1');
@@ -939,6 +950,7 @@ const State = {
   setSchedCount(n) { this.schedCount = n; localStorage.setItem(STORE.schedCount, String(n)); },
   setPayAmount(n) { this.payAmount = n; localStorage.setItem(STORE.payAmount, String(n)); },
   setShowZeroBills(v) { this.showZeroBills = !!v; localStorage.setItem(STORE.showZeroBills, v ? '1' : '0'); },
+  setSkipLastOfThree(v) { this.skipLastOfThree = !!v; localStorage.setItem(STORE.skipLastOfThree, v ? '1' : '0'); },
   toggleCatCollapsed(cat) {
     if (this.collapsedCats.has(cat)) this.collapsedCats.delete(cat);
     else this.collapsedCats.add(cat);
@@ -1035,7 +1047,8 @@ const Sync = {
       schedCount: State.schedCount,
       payAmount: State.payAmount,
       collapsedCats: [...State.collapsedCats],
-      showZeroBills: State.showZeroBills
+      showZeroBills: State.showZeroBills,
+      skipLastOfThree: State.skipLastOfThree
     };
   },
   applyPayload(p) {
@@ -1050,6 +1063,7 @@ const Sync = {
     if (typeof p.payAmount === 'number') { State.setPayAmount(p.payAmount); }
     if (Array.isArray(p.collapsedCats)) { State.collapsedCats = new Set(p.collapsedCats); State.persistCollapsed(); }
     if (typeof p.showZeroBills === 'boolean') { State.setShowZeroBills(p.showZeroBills); }
+    if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
     localStorage.setItem(STORE.seeded, '1');
   },
 
@@ -1870,6 +1884,10 @@ route('settings', (root) => {
           <input id="show-zero" type="checkbox" ${State.showZeroBills ? 'checked' : ''} style="width:auto;" />
           <label for="show-zero" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show $0 bills on dashboard (grayed)</label>
         </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="skip-third" type="checkbox" ${State.skipLastOfThree ? 'checked' : ''} style="width:auto;" />
+          <label for="skip-third" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">For 3-paycheck cycles, use first 2 only</label>
+        </div>
       </div>
       <div class="card">
         <h2>Sync (cloud backup)</h2>
@@ -1925,6 +1943,7 @@ route('settings', (root) => {
   $('#pay-amount').onchange = (e) => { State.setPayAmount(parseFloat(e.target.value) || 0); };
   $('#theme').onchange = (e) => { State.setTheme(e.target.value); };
   $('#show-zero').onchange = (e) => { State.setShowZeroBills(e.target.checked); };
+  $('#skip-third').onchange = (e) => { State.setSkipLastOfThree(e.target.checked); navigate(); };
 
   const signinBtn = $('#sync-signin');
   if (signinBtn) signinBtn.onclick = async () => {
@@ -2179,7 +2198,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','persistCollapsed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','persistCollapsed'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
