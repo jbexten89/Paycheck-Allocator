@@ -235,6 +235,14 @@
     border-radius: var(--radius-lg);
   }
   .cat-group.collapsed .bill-list { display: none; }
+  .cat-spacer { flex: 1; }
+  .cat-delete {
+    background: transparent; border: none;
+    color: var(--ink-muted); font-size: 14px; line-height: 1;
+    padding: 4px 6px; border-radius: 6px; cursor: pointer;
+    transition: color 120ms, background 120ms;
+  }
+  .cat-delete:hover { color: var(--danger); background: rgba(248,113,113,0.1); }
   .cat-chevron {
     display: inline-block;
     color: var(--ink-muted);
@@ -904,6 +912,14 @@ const State = {
     const kept = this.billOrder.filter((x) => !catIds.has(x));
     this.setBillOrder([...kept, ...ordered.map((b) => b.id)]);
   },
+  deleteCategory(cat) {
+    this.bills = this.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') !== cat);
+    this.catOrder = (this.catOrder || []).filter((c) => c !== cat);
+    this.collapsedCats.delete(cat);
+    this.saveBills();
+    localStorage.setItem(STORE.catOrder, JSON.stringify(this.catOrder));
+    this.persistCollapsed();
+  },
   reorderBillsInCategory(cat, newIdOrder) {
     const inCat = this.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat);
     const catIds = new Set(inCat.map((b) => b.id));
@@ -1131,6 +1147,8 @@ route('bills', (root) => {
                   <span class="cat-chevron">${collapsed ? '▸' : '▾'}</span>
                   <span class="cat-name">${escapeHtml(cat)}</span>
                   <span class="cat-meta">${bills.length} bill${bills.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
+                  <span class="cat-spacer"></span>
+                  <button class="cat-delete" data-cat-delete="${escapeAttr(cat)}" aria-label="Delete category">✕</button>
                 </div>
                 <div class="bill-list" role="list">
                   ${bills.map((b) => `
@@ -1291,10 +1309,23 @@ route('bills', (root) => {
       State.setCatOrder(order);
       rerenderKeepScroll();
     },
-    onTap: (el) => {
+    onTap: (el, ev) => {
+      if (ev && ev.target && ev.target.closest('[data-cat-delete]')) return;
       State.toggleCatCollapsed(el.dataset.catToggle);
       rerenderKeepScroll();
     }
+  });
+  $$('[data-cat-delete]').forEach((btn) => {
+    btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const cat = btn.dataset.catDelete;
+      const count = State.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat).length;
+      confirmDialog(`Delete <strong>${escapeHtml(cat)}</strong> and its ${count} bill${count === 1 ? '' : 's'}?`, () => {
+        State.deleteCategory(cat);
+        rerenderKeepScroll();
+      });
+    };
   });
 
   // Bill rows reorderable within their category
