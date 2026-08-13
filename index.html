@@ -331,6 +331,8 @@
   table.schedule tr.expandable:hover { background: var(--paper); }
   table.schedule tr.expanded-detail td { background: var(--paper); font-size: 11px; color: var(--ink-soft); }
   td.total { font-weight: 700; color: var(--good); }
+  tr.row-muted td { color: var(--ink-muted); opacity: 0.55; }
+  tr.row-muted td.total { color: var(--ink-muted); font-weight: 500; }
   .sched-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
   tr.sched-cat-header td {
     background: var(--paper);
@@ -512,7 +514,8 @@ const STORE = {
   billOrder: 'paycheck_allocator.bill_order',
   schedCount: 'paycheck_allocator.sched_count',
   payAmount: 'paycheck_allocator.pay_amount',
-  collapsedCats: 'paycheck_allocator.collapsed_cats'
+  collapsedCats: 'paycheck_allocator.collapsed_cats',
+  showZeroBills: 'paycheck_allocator.show_zero_bills'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -858,6 +861,7 @@ const State = {
     this.payAmount = parseFloat(localStorage.getItem(STORE.payAmount) || '0') || 0;
     try { this.collapsedCats = new Set(JSON.parse(localStorage.getItem(STORE.collapsedCats) || '[]')); }
     catch { this.collapsedCats = new Set(); }
+    this.showZeroBills = localStorage.getItem(STORE.showZeroBills) === '1';
     if (!localStorage.getItem(STORE.seeded)) {
       this.bills = defaultMonthlyBills();
       localStorage.setItem(STORE.seeded, '1');
@@ -880,12 +884,14 @@ const State = {
   setBillOrder(arr) { this.billOrder = arr; localStorage.setItem(STORE.billOrder, JSON.stringify(arr)); },
   setSchedCount(n) { this.schedCount = n; localStorage.setItem(STORE.schedCount, String(n)); },
   setPayAmount(n) { this.payAmount = n; localStorage.setItem(STORE.payAmount, String(n)); },
+  setShowZeroBills(v) { this.showZeroBills = !!v; localStorage.setItem(STORE.showZeroBills, v ? '1' : '0'); },
   toggleCatCollapsed(cat) {
     if (this.collapsedCats.has(cat)) this.collapsedCats.delete(cat);
     else this.collapsedCats.add(cat);
-    localStorage.setItem(STORE.collapsedCats, JSON.stringify([...this.collapsedCats]));
+    this.persistCollapsed();
   },
   isCatCollapsed(cat) { return this.collapsedCats.has(cat); },
+  persistCollapsed() { localStorage.setItem(STORE.collapsedCats, JSON.stringify([...this.collapsedCats])); },
   orderedBillsInCategory(cat) {
     const inCat = this.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat);
     const idx = (id) => {
@@ -1058,36 +1064,48 @@ route('dashboard', (root) => {
       <div class="card">
         <h2 class="accent">Next paycheck breakdown</h2>
         ${
-          next && next.items.length
+          (next && next.items.length) || (State.showZeroBills && State.bills.some((b) => b.amount > 0))
             ? (() => {
-                const catFor = (billId) => {
-                  const b = State.bills.find((x) => x.id === billId);
-                  return (b && b.category && b.category.trim()) || 'Uncategorized';
-                };
-                const byCat = {};
-                for (const it of next.items) {
-                  const c = catFor(it.billId);
-                  (byCat[c] ||= []).push(it);
+                const catFor = (bill) => (bill.category && bill.category.trim()) || 'Uncategorized';
+                const nextItems = (next && next.items) || [];
+                const itemByBillId = new Map(nextItems.map((it) => [it.billId, it]));
+                // Build list of bills to render.
+                let billsToRender;
+                if (State.showZeroBills) {
+                  billsToRender = State.bills.filter((b) => b.amount > 0).map((b) => ({
+                    billId: b.id,
+                    name: b.name,
+                    dueDate: (itemByBillId.get(b.id) || {}).dueDate,
+                    amount: (itemByBillId.get(b.id) || {}).amount || 0,
+                    category: catFor(b)
+                  }));
+                } else {
+                  billsToRender = nextItems.map((it) => ({
+                    billId: it.billId, name: it.name, dueDate: it.dueDate, amount: it.amount,
+                    category: catFor(State.bills.find((x) => x.id === it.billId) || {})
+                  }));
                 }
+                const byCat = {};
+                for (const it of billsToRender) (byCat[it.category] ||= []).push(it);
                 const catNames = State.orderedCategories().filter((c) => byCat[c]);
                 const rowsHtml = catNames.map((cat) => {
                   const items = byCat[cat];
-                  // preserve per-category bill order from State
                   const orderIdx = new Map(State.orderedBillsInCategory(cat).map((b, i) => [b.id, i]));
                   items.sort((a, b) => (orderIdx.get(a.billId) ?? 99) - (orderIdx.get(b.billId) ?? 99));
                   const catTotal = items.reduce((s, it) => s + it.amount, 0);
+                  const activeCount = items.filter((it) => it.amount > 0).length;
                   const header = `
                     <tr class="sched-cat-header">
                       <td colspan="4">
                         <span class="cat-name">${escapeHtml(cat)}</span>
-                        <span class="cat-meta">${items.length} bill${items.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
+                        <span class="cat-meta">${activeCount}${State.showZeroBills && activeCount !== items.length ? '/' + items.length : ''} bill${items.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
                       </td>
                     </tr>
                   `;
                   const rows = items.map((it) => `
-                    <tr>
+                    <tr${it.amount === 0 ? ' class="row-muted"' : ''}>
                       <td>${escapeHtml(it.name)}</td>
-                      <td>${fmtDateShort.format(it.dueDate)}</td>
+                      <td>${it.dueDate ? fmtDateShort.format(it.dueDate) : '—'}</td>
                       <td class="total">${fmtUSD.format(it.amount)}</td>
                     </tr>
                   `).join('');
@@ -1097,7 +1115,7 @@ route('dashboard', (root) => {
                   <thead><tr><th>Bill</th><th>Due</th><th>Allocate</th></tr></thead>
                   <tbody>
                     ${rowsHtml}
-                    <tr class="sched-grand-total"><td colspan="2" style="text-align:right;">Total</td><td class="total">${fmtUSD.format(next.total)}</td></tr>
+                    <tr class="sched-grand-total"><td colspan="2" style="text-align:right;">Total</td><td class="total">${fmtUSD.format(next ? next.total : 0)}</td></tr>
                   </tbody>
                 </table></div>`;
               })()
@@ -1654,6 +1672,10 @@ route('settings', (root) => {
         <select id="theme">
           ${['auto','light','dark'].map((t) => `<option value="${t}" ${t===State.theme?'selected':''}>${t}</option>`).join('')}
         </select>
+        <div style="margin-top:14px; display:flex; align-items:center; gap:10px;">
+          <input id="show-zero" type="checkbox" ${State.showZeroBills ? 'checked' : ''} style="width:auto;" />
+          <label for="show-zero" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show $0 bills on dashboard (grayed)</label>
+        </div>
       </div>
       <div class="card">
         <h2>Data</h2>
@@ -1691,6 +1713,7 @@ route('settings', (root) => {
   $('#sched-count').onchange = (e) => { State.setSchedCount(parseInt(e.target.value, 10)); };
   $('#pay-amount').onchange = (e) => { State.setPayAmount(parseFloat(e.target.value) || 0); };
   $('#theme').onchange = (e) => { State.setTheme(e.target.value); };
+  $('#show-zero').onchange = (e) => { State.setShowZeroBills(e.target.checked); };
 
   $('#export').onclick = () => {
     const blob = new Blob([JSON.stringify({ bills: State.bills, payStart: State.payStart, frequency: State.frequency }, null, 2)], { type: 'application/json' });
