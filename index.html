@@ -740,11 +740,13 @@ function computeAllocations(bills, payDates, opts = {}) {
       lastDueKey = dueKey;
 
       // Count pay dates that fund this cycle: [prevDue, D).
-      // Use canonical count only when the whole cycle exists in the user's world
-      // (prevDue >= payStart); otherwise the cycle straddles payStart and we
-      // should only count paychecks that actually exist in the schedule.
+      // Anchor-based bills (everyNWeeks / everyNMonths) get canonical count so
+      // long-interval cycles that predate payStart still divide correctly.
+      // Day-of-month monthly bills use only paychecks in the visible schedule
+      // — a partial "current cycle" should be funded by remaining paychecks only.
+      const isAnchorBased = bill.recurrence === 'everyNMonths' || bill.recurrence === 'everyNWeeks';
       let cycleCount;
-      if (canonStep && canonPayStart && prevDue >= canonPayStart) {
+      if (canonStep && canonPayStart && isAnchorBased) {
         cycleCount = canonicalCycleCount(canonPayStart, canonStep, prevDue, D);
       } else {
         cycleCount = 0;
