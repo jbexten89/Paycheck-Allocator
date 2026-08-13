@@ -842,14 +842,18 @@ route('dashboard', (root) => {
       <div class="card">
         <div class="label">Next pay date</div>
         <div class="value neutral" style="font-size:18px;">${next ? fmtDate.format(next.payDate) : '—'}</div>
-        <div class="hint">${next ? daysUntil(next.payDate) : ''}</div>
+        <div class="hint">${
+          State.payAmount > 0
+            ? `${fmtUSD.format(State.payAmount)}${next ? ' · ' + daysUntil(next.payDate) : ''}`
+            : (next ? daysUntil(next.payDate) : '')
+        }</div>
       </div>
       <div class="card">
         <div class="label">Set aside next pay</div>
         <div class="value amber">${fmtUSD.format(next ? next.total : 0)}</div>
         <div class="hint">${
           State.payAmount > 0 && next
-            ? `of ${fmtUSD.format(State.payAmount)} · ${fmtUSD.format(Math.max(0, State.payAmount - next.total))} leftover`
+            ? `${fmtUSD.format(Math.max(0, State.payAmount - next.total))} leftover`
             : `across ${next ? next.items.length : 0} bill${next && next.items.length === 1 ? '' : 's'}`
         }</div>
       </div>
