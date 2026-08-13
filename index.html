@@ -1108,7 +1108,13 @@ const Sync = {
 const routes = {};
 function route(name, fn) { routes[name] = fn; }
 
+function releaseScrollLock() {
+  document.body.classList.remove('drag-lock');
+  document.documentElement.style.overflow = '';
+}
+
 function navigate() {
+  releaseScrollLock();
   const hash = location.hash.replace(/^#/, '') || 'dashboard';
   const [base, ...rest] = hash.split('/');
   const fn = routes[base] || routes.dashboard;
@@ -2136,6 +2142,17 @@ function runTests(log) {
 }
 
 /* ------------------------- Boot ------------------------- */
+// Belt-and-suspenders: clear any stuck drag lock from a previous session.
+document.body.classList.remove('drag-lock');
+document.documentElement.style.overflow = '';
+window.addEventListener('pointerup', () => setTimeout(() => {
+  // If drag-lock somehow stuck (interrupted drag), clear it on next frame after any drop handler runs.
+  if (!document.querySelector('.reorder-ghost')) {
+    document.body.classList.remove('drag-lock');
+    document.documentElement.style.overflow = '';
+  }
+}, 50));
+
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
