@@ -1568,8 +1568,21 @@ function openBillEditor(id) {
 route('schedule', (root) => {
   const render = () => {
     const count = State.schedCount;
-    const payDates = State.paySchedule(count);
-    const { perPaycheck, byBill } = computeAllocations(State.bills, payDates);
+    // Use the same wide date range as the dashboard so cycle counts agree.
+    const stepDays = { weekly: 7, biweekly: 14, triweekly: 21 }[State.frequency];
+    let allDates;
+    if (stepDays) {
+      const anchor = addDays(parseISO(State.payStart), -52 * stepDays);
+      allDates = generatePayDates(anchor, 156, State.frequency);
+    } else {
+      allDates = generatePayDates(parseISO(State.payStart), 60, State.frequency);
+    }
+    const { perPaycheck: allPer } = computeAllocations(State.bills, allDates);
+    // Show only pay dates >= today, up to `count`.
+    const today = new Date(); today.setHours(0,0,0,0);
+    const startIdx = allPer.findIndex((p) => p.payDate >= today);
+    const from = startIdx === -1 ? 0 : startIdx;
+    const perPaycheck = allPer.slice(from, from + count);
     const activeBills = State.bills.filter((b) => b.amount > 0);
     const billOrder = activeBills.slice().sort((a,b)=>a.dueDay-b.dueDay);
     // group by category, ordered
