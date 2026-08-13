@@ -347,7 +347,9 @@
   tr.row-muted td { color: var(--ink-muted); opacity: 0.55; }
   tr.row-muted td.total { color: var(--ink-muted); font-weight: 500; }
   .sched-dot { display: inline-block; width: 6px; height: 6px; margin-right: 8px; vertical-align: middle; }
-  .schedule-wrap table.schedule td.cyc-1 { background: rgba(59,130,246,0.08); }
+  .schedule-wrap table.schedule td.cyc-0 { background: rgba(59,130,246,0.04); }
+  .schedule-wrap table.schedule td.cyc-1 { background: rgba(59,130,246,0.20); }
+  .schedule-wrap table.schedule td.cyc-start { border-left: 2px solid var(--amber); }
   tr.sched-cat-header td {
     background: var(--paper);
     padding: 6px 0 !important;
@@ -1777,8 +1779,9 @@ route('schedule', (root) => {
                       const it = p.items.find((x) => x.billId === b.id);
                       if (!it) { cycleKey = null; return `<td>—</td>`; }
                       const key = it.dueDate.toISOString();
-                      if (key !== cycleKey) { parity ^= 1; cycleKey = key; }
-                      return `<td class="cyc-${parity}">${fmtUSD.format(it.amount)}</td>`;
+                      const isStart = (key !== cycleKey);
+                      if (isStart) { parity ^= 1; cycleKey = key; }
+                      return `<td class="cyc-${parity}${isStart ? ' cyc-start' : ''}">${fmtUSD.format(it.amount)}</td>`;
                     }).join('');
                     const detail = perPaycheck.map((p) => {
                       const it = p.items.find((x) => x.billId === b.id);
