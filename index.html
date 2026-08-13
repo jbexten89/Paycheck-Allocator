@@ -79,6 +79,16 @@
   h1, h2, h3, .serif { font-family: var(--sans); font-weight: 600; letter-spacing: -0.01em; }
   h1 { font-size: 24px; margin: 0 0 4px; }
   h2 { font-size: 16px; margin: 0 0 14px; font-weight: 600; }
+  h2.accent {
+    color: var(--amber);
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: 12px;
+  }
   h3 { font-size: 15px; margin: 0 0 8px; }
   a { color: var(--amber); text-decoration: none; }
   button { font-family: var(--sans); cursor: pointer; }
@@ -152,8 +162,8 @@
   .card { min-width: 0; }
   .summary .value { overflow-wrap: anywhere; }
 
-  .summary .card { padding: 14px 18px; }
-  .summary .label { font-size: 12px; color: var(--ink-muted); font-weight: 500; }
+  .summary .card { padding: 14px 18px; border-left: 3px solid var(--amber); }
+  .summary .label { font-size: 12px; color: var(--amber); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
   .summary .value { font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 700; color: var(--good); margin-top: 4px; letter-spacing: -0.01em; line-height: 1.2; }
   .summary .value.neutral { color: var(--ink); }
   .summary .value.amber { color: var(--amber); }
@@ -316,9 +326,9 @@
     padding-right: 12px;
   }
   tr.sched-cat-header .cat-name {
-    font-family: var(--sans); font-size: 11px; font-weight: 600;
+    font-family: var(--sans); font-size: 11px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--ink-muted); margin-right: 12px;
+    color: var(--amber); margin-right: 12px;
   }
   tr.sched-cat-header .cat-meta {
     font-family: var(--sans); font-size: 11px; color: var(--ink-muted);
@@ -863,7 +873,7 @@ route('dashboard', (root) => {
 
     <div style="margin-top:24px;">
       <div class="card">
-        <h2>Next paycheck breakdown</h2>
+        <h2 class="accent">Next paycheck breakdown</h2>
         ${
           next && next.items.length
             ? (() => {
