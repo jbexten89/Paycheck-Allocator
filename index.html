@@ -518,9 +518,27 @@
 /* ------------------------- Supabase config ------------------------- */
 const SUPABASE_URL = 'https://coqestfkjjhztdmorgbo.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvcWVzdGZrampoenRkbW9yZ2JvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2NTM1NzMsImV4cCI6MjEwMjIyOTU3M30.HWFpprcVD-O2WnlOQgTJJe6ao7jhEucvLXjE2VAY6Bs';
-const sb = (typeof supabase !== 'undefined')
-  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
-  : null;
+let sb = null;
+function ensureSb() {
+  if (sb) return sb;
+  if (typeof supabase !== 'undefined' && supabase.createClient) {
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  }
+  return sb;
+}
+function loadSupabaseScript() {
+  if (typeof supabase !== 'undefined') return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-supabase-js]');
+    if (existing) { existing.addEventListener('load', () => resolve()); existing.addEventListener('error', () => reject(new Error('Failed to load Supabase from CDN'))); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+    s.dataset.supabaseJs = '1';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load Supabase from CDN — check network / ad blocker'));
+    document.head.appendChild(s);
+  });
+}
 
 const STORE = {
   bills: 'paycheck_allocator.bills',
@@ -1019,7 +1037,8 @@ const Sync = {
   },
 
   async init() {
-    if (!sb) { this.setStatus('offline'); return; }
+    try { await loadSupabaseScript(); } catch (e) { this.setStatus('error', e.message); return; }
+    if (!ensureSb()) { this.setStatus('error', 'Supabase client init failed'); return; }
     const { data } = await sb.auth.getSession();
     if (data.session) {
       this.user = data.session.user;
@@ -1041,16 +1060,17 @@ const Sync = {
     window.addEventListener('online', () => { if (this.user) this.push(); });
   },
   async signIn(email) {
-    if (!sb) throw new Error('Supabase not loaded');
+    try { await loadSupabaseScript(); } catch (e) { throw new Error('Supabase CDN unreachable: ' + e.message); }
+    if (!ensureSb()) throw new Error('Supabase client failed to initialize');
     const { error } = await sb.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: location.href.split('#')[0] }
     });
     if (error) throw error;
   },
-  async signOut() { if (sb) await sb.auth.signOut(); },
+  async signOut() { if (ensureSb()) await sb.auth.signOut(); },
   async pullOrPush() {
-    if (!sb || !this.user) return;
+    if (!ensureSb() || !this.user) return;
     this.setStatus('syncing');
     try {
       const { data, error } = await sb.from('paycheck_data').select('payload,updated_at').maybeSingle();
@@ -1064,13 +1084,13 @@ const Sync = {
     } catch (e) { this.setStatus('error', e.message); }
   },
   push() {
-    if (!sb || !this.user) return;
+    if (!ensureSb() || !this.user) return;
     if (!navigator.onLine) { this.setStatus('offline'); return; }
     clearTimeout(this.pushTimer);
     this.pushTimer = setTimeout(() => this._pushNow(), 800);
   },
   async _pushNow() {
-    if (!sb || !this.user) return;
+    if (!ensureSb() || !this.user) return;
     this.setStatus('syncing');
     try {
       const { error } = await sb.from('paycheck_data').upsert({
