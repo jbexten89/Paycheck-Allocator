@@ -178,7 +178,7 @@
   /* Bills */
   .bill-row {
     display: grid;
-    grid-template-columns: 8px 1fr auto auto;
+    grid-template-columns: 1fr auto auto;
     gap: 12px;
     align-items: center;
     padding: 10px 14px;
@@ -834,19 +834,18 @@ route('dashboard', (root) => {
                   `;
                   const rows = items.map((it) => `
                     <tr>
-                      <td><span class="sched-dot" style="background:${it.color || 'var(--amber)'}"></span>${escapeHtml(it.name)}</td>
+                      <td>${escapeHtml(it.name)}</td>
                       <td>${fmtDateShort.format(it.dueDate)}</td>
-                      <td>1 / ${it.paychecksInCycle}</td>
                       <td class="total">${fmtUSD.format(it.amount)}</td>
                     </tr>
                   `).join('');
                   return header + rows;
                 }).join('');
                 return `<div style="overflow-x:auto;"><table class="schedule" style="min-width:0;">
-                  <thead><tr><th>Bill</th><th>Due</th><th>Of cycle</th><th>Allocate</th></tr></thead>
+                  <thead><tr><th>Bill</th><th>Due</th><th>Allocate</th></tr></thead>
                   <tbody>
                     ${rowsHtml}
-                    <tr class="sched-grand-total"><td colspan="3" style="text-align:right;">Total</td><td class="total">${fmtUSD.format(next.total)}</td></tr>
+                    <tr class="sched-grand-total"><td colspan="2" style="text-align:right;">Total</td><td class="total">${fmtUSD.format(next.total)}</td></tr>
                   </tbody>
                 </table></div>`;
               })()
@@ -905,7 +904,6 @@ route('bills', (root) => {
                     const bFirst = bi === 0, bLast = bi === bills.length - 1;
                     return `
                     <div class="bill-row" role="listitem" data-id="${b.id}" tabindex="0">
-                      <div class="bill-color" style="background:${b.color || 'var(--amber)'}"></div>
                       <div>
                         <span class="bill-name">${escapeHtml(b.name)}</span>
                         <span class="bill-meta">${
@@ -1034,10 +1032,6 @@ function openBillEditor(id) {
         <div>
           <label>Category</label>
           <input name="category" type="text" value="${escapeAttr(b.category || '')}" placeholder="Utilities" />
-        </div>
-        <div>
-          <label>Color</label>
-          <input name="color" type="color" value="${b.color || '#B8860B'}" />
         </div>
         <div class="full" id="preview"></div>
       </div>
@@ -1198,7 +1192,7 @@ route('schedule', (root) => {
                     }, 0);
                     return `
                       <tr class="expandable" data-i="${idx}">
-                        <td><span class="sched-dot" style="background:${b.color || 'var(--amber)'}"></span>${escapeHtml(b.name)}</td>
+                        <td>${escapeHtml(b.name)}</td>
                         ${cells}
                         <td class="total">${fmtUSD.format(billTotal)}</td>
                       </tr>
