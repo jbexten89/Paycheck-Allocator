@@ -1128,7 +1128,7 @@ route('schedule', (root) => {
           <div class="sub">Per-bill allocations across upcoming paychecks. Click a row for running balances.</div>
         </div>
         <div class="segmented" role="radiogroup" aria-label="Periods">
-          ${[3, 6, 12, 26].map((n) => `<button data-n="${n}" class="${n===count?'active':''}">${n}</button>`).join('')}
+          ${[3, 26].map((n) => `<button data-n="${n}" class="${n===count?'active':''}">${n}</button>`).join('')}
         </div>
       </div>
 
