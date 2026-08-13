@@ -1436,11 +1436,11 @@ function openBillEditor(id) {
       };
       const renderPreview = () => {
         const draft = readDraft();
-        const dates = State.paySchedule(3);
+        const dates = State.paySchedule(4);
         const { perPaycheck } = computeAllocations([draft], dates);
         preview.innerHTML = `
           <hr class="rule"/>
-          <div class="label" style="margin-bottom:6px;">Next 3 paychecks (preview)</div>
+          <div class="label" style="margin-bottom:6px;">Next 4 paychecks (preview)</div>
           <table class="schedule" style="min-width:0;">
             <thead><tr><th>Pay date</th><th>Allocate</th><th>Running</th></tr></thead>
             <tbody>
