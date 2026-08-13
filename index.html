@@ -1105,9 +1105,8 @@ function openBillEditor(id) {
 }
 
 route('schedule', (root) => {
-  let count = parseInt(sessionStorage.getItem('sched.count') || '12', 10);
+  let count = 3;
   const render = () => {
-    sessionStorage.setItem('sched.count', count);
     const payDates = State.paySchedule(count);
     const { perPaycheck, byBill } = computeAllocations(State.bills, payDates);
     const activeBills = State.bills.filter((b) => b.amount > 0);
@@ -1126,9 +1125,6 @@ route('schedule', (root) => {
         <div>
           <h1>Pay Schedule</h1>
           <div class="sub">Per-bill allocations across upcoming paychecks. Click a row for running balances.</div>
-        </div>
-        <div class="segmented" role="radiogroup" aria-label="Periods">
-          ${[3, 26].map((n) => `<button data-n="${n}" class="${n===count?'active':''}">${n}</button>`).join('')}
         </div>
       </div>
 
@@ -1207,7 +1203,6 @@ route('schedule', (root) => {
       }
       ${testsBlock()}
     `;
-    $$('.segmented button').forEach((b) => b.onclick = () => { count = parseInt(b.dataset.n, 10); render(); });
     $$('tr.expandable').forEach((tr) => tr.onclick = () => {
       const det = root.querySelector(`tr[data-detail-for="${tr.dataset.i}"]`);
       if (det) det.style.display = det.style.display === 'none' ? 'table-row' : 'none';
