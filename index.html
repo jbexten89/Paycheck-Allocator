@@ -190,6 +190,10 @@
   }
   .bill-row:hover { background: var(--paper); }
   .bill-row:last-child { border-bottom: none; }
+  .bill-row[draggable="true"] { cursor: grab; }
+  .bill-row.dragging { opacity: 0.4; cursor: grabbing; }
+  .bill-row.drag-over-top { box-shadow: inset 0 2px 0 var(--amber); }
+  .bill-row.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--amber); }
   .bill-list { border: 1px solid var(--hairline); border-radius: var(--radius-lg); overflow: hidden; background: var(--paper-2); }
   .bill-color { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
   .bill-name { font-family: var(--sans); font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.2; display: inline; }
@@ -685,6 +689,15 @@ const State = {
     const kept = this.billOrder.filter((x) => !catIds.has(x));
     this.setBillOrder([...kept, ...ordered.map((b) => b.id)]);
   },
+  reorderBillsInCategory(cat, newIdOrder) {
+    const inCat = this.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat);
+    const catIds = new Set(inCat.map((b) => b.id));
+    // sanitize: keep only IDs actually in this category
+    const cleaned = newIdOrder.filter((id) => catIds.has(id));
+    // rebuild global billOrder
+    const kept = this.billOrder.filter((x) => !catIds.has(x));
+    this.setBillOrder([...kept, ...cleaned]);
+  },
   orderedCategories() {
     const present = new Set();
     for (const b of this.bills) {
@@ -903,7 +916,7 @@ route('bills', (root) => {
                   ${bills.map((b, bi) => {
                     const bFirst = bi === 0, bLast = bi === bills.length - 1;
                     return `
-                    <div class="bill-row" role="listitem" data-id="${b.id}" tabindex="0">
+                    <div class="bill-row" role="listitem" data-id="${b.id}" tabindex="0" draggable="true">
                       <div>
                         <span class="bill-name">${escapeHtml(b.name)}</span>
                         <span class="bill-meta">${
@@ -953,6 +966,53 @@ route('bills', (root) => {
   });
   $$('[data-bill-down]').forEach((btn) => {
     btn.onclick = (e) => { e.stopPropagation(); State.moveBill(btn.dataset.billDown, +1); rerenderKeepScroll(); };
+  });
+
+  // Drag-and-drop reorder (desktop). Touch users still have ▲▼.
+  let dragId = null;
+  let dragCat = null;
+  $$('.bill-row').forEach((row) => {
+    row.addEventListener('dragstart', (e) => {
+      dragId = row.dataset.id;
+      dragCat = row.closest('.cat-group')?.dataset.cat || null;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', dragId); } catch {}
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      $$('.bill-row.drag-over-top, .bill-row.drag-over-bottom').forEach((n) => n.classList.remove('drag-over-top', 'drag-over-bottom'));
+      dragId = null; dragCat = null;
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!dragId || row.dataset.id === dragId) return;
+      const cat = row.closest('.cat-group')?.dataset.cat;
+      if (cat !== dragCat) return; // only within same category
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = row.getBoundingClientRect();
+      const above = (e.clientY - rect.top) < rect.height / 2;
+      row.classList.toggle('drag-over-top', above);
+      row.classList.toggle('drag-over-bottom', !above);
+    });
+    row.addEventListener('dragleave', () => {
+      row.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+    row.addEventListener('drop', (e) => {
+      if (!dragId || row.dataset.id === dragId) return;
+      const cat = row.closest('.cat-group')?.dataset.cat;
+      if (cat !== dragCat) return;
+      e.preventDefault();
+      const rect = row.getBoundingClientRect();
+      const above = (e.clientY - rect.top) < rect.height / 2;
+      const rows = $$(`.cat-group[data-cat="${CSS.escape(cat)}"] .bill-row`);
+      const ids = rows.map((r) => r.dataset.id).filter((id) => id !== dragId);
+      const targetIdx = ids.indexOf(row.dataset.id);
+      const insertAt = above ? targetIdx : targetIdx + 1;
+      ids.splice(insertAt, 0, dragId);
+      State.reorderBillsInCategory(cat, ids);
+      rerenderKeepScroll();
+    });
   });
   $$('[data-del]').forEach((b) => {
     b.onclick = (e) => {
