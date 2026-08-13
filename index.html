@@ -688,7 +688,20 @@ function nextDueCycleFor(bill, P) {
  *  - Clamp due day to days-in-month.
  *  - Maintain running balance per bill, seeded with initialSaved, resets when due passes.
  */
-function computeAllocations(bills, payDates) {
+// Count pay dates falling in [prevDue, D) canonically from a payStart + step-days cadence.
+function canonicalCycleCount(payStart, stepDays, prevDue, D) {
+  const startMs = payStart.getTime();
+  const stepMs = stepDays * 86400000;
+  const nFirst = Math.ceil((prevDue.getTime() - startMs) / stepMs);
+  const nLastExcl = (D.getTime() - startMs) / stepMs;
+  const nLast = Number.isInteger(nLastExcl) ? nLastExcl - 1 : Math.floor(nLastExcl);
+  return Math.max(0, nLast - nFirst + 1);
+}
+
+function computeAllocations(bills, payDates, opts = {}) {
+  const canonPayStart = opts.payStart ? parseISO(opts.payStart) : (State && State.payStart ? parseISO(State.payStart) : null);
+  const canonFreq = opts.frequency || (State && State.frequency);
+  const canonStep = { weekly: 7, biweekly: 14, triweekly: 21 }[canonFreq];
   const perPaycheck = payDates.map((d) => ({ payDate: d, total: 0, items: [] }));
   const byBill = {};
   if (!payDates.length) return { perPaycheck, byBill };
@@ -727,11 +740,14 @@ function computeAllocations(bills, payDates) {
       lastDueKey = dueKey;
 
       // Count pay dates that fund this cycle: [prevDue, D).
-      // A paycheck ON prevDue counts (its own D is this cycle's D too).
-      // A paycheck ON D does NOT count (it funds the following cycle).
-      let cycleCount = 0;
-      for (const pd of payDates) {
-        if (pd >= prevDue && pd < D) cycleCount++;
+      // Prefer canonical count from the fixed pay cadence so cycles that extend
+      // beyond the visible schedule window still divide correctly.
+      let cycleCount;
+      if (canonStep && canonPayStart) {
+        cycleCount = canonicalCycleCount(canonPayStart, canonStep, prevDue, D);
+      } else {
+        cycleCount = 0;
+        for (const pd of payDates) if (pd >= prevDue && pd < D) cycleCount++;
       }
       if (cycleCount === 0) continue;
 
