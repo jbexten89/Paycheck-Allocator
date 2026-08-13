@@ -461,7 +461,8 @@ const STORE = {
   seeded: 'paycheck_allocator.seeded',
   catOrder: 'paycheck_allocator.cat_order',
   lastCat: 'paycheck_allocator.last_category',
-  billOrder: 'paycheck_allocator.bill_order'
+  billOrder: 'paycheck_allocator.bill_order',
+  schedCount: 'paycheck_allocator.sched_count'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -667,6 +668,8 @@ const State = {
     catch { this.catOrder = []; }
     try { this.billOrder = JSON.parse(localStorage.getItem(STORE.billOrder) || '[]'); }
     catch { this.billOrder = []; }
+    const sc = parseInt(localStorage.getItem(STORE.schedCount) || '6', 10);
+    this.schedCount = [6, 12, 26].includes(sc) ? sc : 6;
     if (!localStorage.getItem(STORE.seeded)) {
       this.bills = [
         { id: crypto.randomUUID(), name: 'Rent',          dueDay: 1,  amount: 1500, initialSaved: 0, category: 'Housing',   color: '#8C5E3C' },
@@ -692,6 +695,7 @@ const State = {
     this.setCatOrder(cats);
   },
   setBillOrder(arr) { this.billOrder = arr; localStorage.setItem(STORE.billOrder, JSON.stringify(arr)); },
+  setSchedCount(n) { this.schedCount = n; localStorage.setItem(STORE.schedCount, String(n)); },
   orderedBillsInCategory(cat) {
     const inCat = this.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat);
     const idx = (id) => {
@@ -1226,10 +1230,8 @@ function openBillEditor(id) {
 }
 
 route('schedule', (root) => {
-  let count = parseInt(sessionStorage.getItem('sched.count') || '6', 10);
-  if (![6, 12, 26].includes(count)) count = 6;
   const render = () => {
-    sessionStorage.setItem('sched.count', count);
+    const count = State.schedCount;
     const payDates = State.paySchedule(count);
     const { perPaycheck, byBill } = computeAllocations(State.bills, payDates);
     const activeBills = State.bills.filter((b) => b.amount > 0);
@@ -1248,9 +1250,6 @@ route('schedule', (root) => {
         <div>
           <h1>Pay Schedule</h1>
           <div class="sub">Per-bill allocations across upcoming paychecks. Click a row for running balances.</div>
-        </div>
-        <div class="segmented" role="radiogroup" aria-label="Periods">
-          ${[6, 12, 26].map((n) => `<button data-n="${n}" class="${n===count?'active':''}">${n}</button>`).join('')}
         </div>
       </div>
 
@@ -1330,7 +1329,6 @@ route('schedule', (root) => {
           </div>`
       }
     `;
-    $$('.segmented button').forEach((b) => b.onclick = () => { count = parseInt(b.dataset.n, 10); render(); });
     $$('tr.expandable').forEach((tr) => tr.onclick = () => {
       const det = root.querySelector(`tr[data-detail-for="${tr.dataset.i}"]`);
       if (det) det.style.display = det.style.display === 'none' ? 'table-row' : 'none';
@@ -1357,6 +1355,12 @@ route('settings', (root) => {
           <label>Frequency</label>
           <select id="freq">
             ${['biweekly','weekly','semi-monthly','monthly'].map((f) => `<option value="${f}" ${f===State.frequency?'selected':''}>${f}</option>`).join('')}
+          </select>
+        </div>
+        <div style="margin-top:14px;">
+          <label>Schedule view (pay periods)</label>
+          <select id="sched-count">
+            ${[6,12,26].map((n) => `<option value="${n}" ${n===State.schedCount?'selected':''}>${n}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -1388,6 +1392,7 @@ route('settings', (root) => {
 
   $('#pay-start').onchange = (e) => { State.setPayStart(e.target.value); };
   $('#freq').onchange = (e) => { State.setFrequency(e.target.value); };
+  $('#sched-count').onchange = (e) => { State.setSchedCount(parseInt(e.target.value, 10)); };
   $('#theme').onchange = (e) => { State.setTheme(e.target.value); };
 
   $('#export').onclick = () => {
