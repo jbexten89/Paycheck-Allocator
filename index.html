@@ -191,10 +191,11 @@
   }
   .bill-row:hover { background: var(--paper); }
   .bill-row:last-child { border-bottom: none; }
-  .bill-row[draggable="true"] { cursor: grab; }
-  .bill-row.dragging { opacity: 0.4; cursor: grabbing; }
+  .bill-row { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+  .bill-row.reorder-source { opacity: 0.3; }
   .bill-row.drag-over-top { box-shadow: inset 0 2px 0 var(--amber); }
   .bill-row.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--amber); }
+  .reorder-ghost { border-radius: var(--radius-lg); overflow: hidden; }
   .bill-list { border: 1px solid var(--hairline); border-radius: var(--radius-lg); overflow: hidden; background: var(--paper-2); }
   .bill-color { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
   .bill-name { font-family: var(--sans); font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.2; display: inline; }
@@ -214,8 +215,8 @@
     position: relative;
     user-select: none;
   }
-  .cat-header[draggable="true"] { cursor: grab; }
-  .cat-header[draggable="true"]::before {
+  .cat-header { touch-action: pan-y; }
+  .cat-header::before {
     content: "⋮⋮";
     color: var(--ink-muted);
     letter-spacing: -3px;
@@ -225,9 +226,9 @@
     opacity: 0.5;
   }
   .cat-header:hover { border-color: var(--hairline-strong); }
-  .cat-header.dragging { opacity: 0.4; cursor: grabbing; }
-  .cat-header.drag-over-top { border-top: 2px solid var(--amber); }
-  .cat-header.drag-over-bottom { border-bottom: 2px solid var(--amber); }
+  .cat-header.reorder-source { opacity: 0.3; }
+  .cat-header.drag-over-top { box-shadow: inset 0 3px 0 var(--amber); }
+  .cat-header.drag-over-bottom { box-shadow: inset 0 -3px 0 var(--amber); }
   .cat-name {
     font-family: var(--sans); font-size: 11px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.08em;
@@ -948,13 +949,13 @@ route('bills', (root) => {
             const catTotal = bills.reduce((s, b) => s + (Number(b.amount) || 0), 0);
             return `
               <div class="cat-group" data-cat="${escapeAttr(cat)}">
-                <div class="cat-header" draggable="true" data-cat-drag="${escapeAttr(cat)}">
+                <div class="cat-header" data-cat-drag="${escapeAttr(cat)}">
                   <span class="cat-name">${escapeHtml(cat)}</span>
                   <span class="cat-meta">${bills.length} bill${bills.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
                 </div>
                 <div class="bill-list" role="list">
                   ${bills.map((b) => `
-                    <div class="bill-row" role="listitem" data-id="${b.id}" tabindex="0" draggable="true">
+                    <div class="bill-row" role="listitem" data-id="${b.id}" tabindex="0">
                       <div>
                         <span class="bill-name">${escapeHtml(b.name)}</span>
                         <span class="bill-meta">${
@@ -988,92 +989,129 @@ route('bills', (root) => {
     navigate();
     requestAnimationFrame(() => window.scrollTo(0, y));
   };
-  // Drag-and-drop reorder for category groups (desktop).
-  let dragCatName = null;
-  $$('[data-cat-drag]').forEach((hdr) => {
-    hdr.addEventListener('dragstart', (e) => {
-      dragCatName = hdr.dataset.catDrag;
-      hdr.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', 'cat:' + dragCatName); } catch {}
-      e.stopPropagation();
+  // Pointer-based drag-and-drop (works on mouse + touch).
+  // On touch, long-press (350ms) starts the drag. On mouse, immediate.
+  function makeReorderable(items, opts) {
+    // opts.groupOf(item) -> group key; items only reorder within same group
+    // opts.onDrop(fromItem, toItem, above) -> apply reorder + rerender
+    items.forEach((item) => {
+      item.addEventListener('pointerdown', (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        const startX = e.clientX, startY = e.clientY;
+        const isTouch = e.pointerType === 'touch';
+        let ghost = null;
+        let holdTimer = null;
+        let armed = !isTouch; // mouse arms immediately, touch after long-press
+        let cancelled = false;
+
+        const start = () => {
+          if (cancelled || ghost) return;
+          const rect = item.getBoundingClientRect();
+          ghost = item.cloneNode(true);
+          Object.assign(ghost.style, {
+            position: 'fixed', left: rect.left + 'px', top: rect.top + 'px',
+            width: rect.width + 'px', pointerEvents: 'none',
+            opacity: '0.9', zIndex: '9999', transform: 'scale(1.02)',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.45)', margin: '0',
+            transition: 'none'
+          });
+          ghost.classList.add('reorder-ghost');
+          document.body.appendChild(ghost);
+          item.classList.add('reorder-source');
+          if (isTouch && navigator.vibrate) { try { navigator.vibrate(20); } catch {} }
+        };
+
+        if (isTouch) holdTimer = setTimeout(() => { armed = true; start(); }, 350);
+
+        const clearIndicators = () => items.forEach((n) => n.classList.remove('drag-over-top', 'drag-over-bottom'));
+
+        const move = (me) => {
+          const dx = me.clientX - startX;
+          const dy = me.clientY - startY;
+          if (!armed) {
+            // Cancel long-press if user moves before it fires
+            if (Math.hypot(dx, dy) > 8) { clearTimeout(holdTimer); cancelled = true; cleanup(); }
+            return;
+          }
+          if (!ghost && Math.hypot(dx, dy) > 4) start();
+          if (!ghost) return;
+          me.preventDefault();
+          ghost.style.transform = `translate(${dx}px, ${dy}px) scale(1.02)`;
+          ghost.style.display = 'none';
+          const el = document.elementFromPoint(me.clientX, me.clientY);
+          ghost.style.display = '';
+          const target = el ? el.closest(items[0]?.matches ? items[0].tagName + '[' + Object.keys(items[0].dataset).map((k) => 'data-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())).join('][') + ']' : '*') : null;
+          // simpler: find nearest item in `items` list
+          let hit = null;
+          if (el) for (const cand of items) { if (cand === el || cand.contains(el)) { hit = cand; break; } }
+          clearIndicators();
+          if (hit && hit !== item && (!opts.groupOf || opts.groupOf(hit) === opts.groupOf(item))) {
+            const trect = hit.getBoundingClientRect();
+            const above = (me.clientY - trect.top) < trect.height / 2;
+            hit.classList.toggle('drag-over-top', above);
+            hit.classList.toggle('drag-over-bottom', !above);
+          }
+        };
+
+        const up = (ue) => {
+          clearTimeout(holdTimer);
+          window.removeEventListener('pointermove', move, { passive: false });
+          window.removeEventListener('pointerup', up);
+          window.removeEventListener('pointercancel', up);
+          if (!ghost) { cleanup(); return; }
+          ghost.style.display = 'none';
+          const el = document.elementFromPoint(ue.clientX, ue.clientY);
+          let hit = null;
+          if (el) for (const cand of items) { if (cand === el || cand.contains(el)) { hit = cand; break; } }
+          clearIndicators();
+          if (hit && hit !== item && (!opts.groupOf || opts.groupOf(hit) === opts.groupOf(item))) {
+            const trect = hit.getBoundingClientRect();
+            const above = (ue.clientY - trect.top) < trect.height / 2;
+            opts.onDrop(item, hit, above);
+          }
+          cleanup();
+        };
+
+        const cleanup = () => {
+          if (ghost) { ghost.remove(); ghost = null; }
+          item.classList.remove('reorder-source');
+        };
+
+        try { item.setPointerCapture?.(e.pointerId); } catch {}
+        window.addEventListener('pointermove', move, { passive: false });
+        window.addEventListener('pointerup', up);
+        window.addEventListener('pointercancel', up);
+      });
     });
-    hdr.addEventListener('dragend', () => {
-      hdr.classList.remove('dragging');
-      $$('.cat-header.drag-over-top, .cat-header.drag-over-bottom').forEach((n) => n.classList.remove('drag-over-top', 'drag-over-bottom'));
-      dragCatName = null;
-    });
-    hdr.addEventListener('dragover', (e) => {
-      if (!dragCatName || hdr.dataset.catDrag === dragCatName) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      const rect = hdr.getBoundingClientRect();
-      const above = (e.clientY - rect.top) < rect.height / 2;
-      hdr.classList.toggle('drag-over-top', above);
-      hdr.classList.toggle('drag-over-bottom', !above);
-    });
-    hdr.addEventListener('dragleave', () => {
-      hdr.classList.remove('drag-over-top', 'drag-over-bottom');
-    });
-    hdr.addEventListener('drop', (e) => {
-      if (!dragCatName || hdr.dataset.catDrag === dragCatName) return;
-      e.preventDefault();
-      const rect = hdr.getBoundingClientRect();
-      const above = (e.clientY - rect.top) < rect.height / 2;
-      const order = State.orderedCategories().filter((c) => c !== dragCatName);
-      const targetIdx = order.indexOf(hdr.dataset.catDrag);
+  }
+
+  // Categories reorderable
+  makeReorderable($$('[data-cat-drag]'), {
+    onDrop: (fromEl, toEl, above) => {
+      const fromCat = fromEl.dataset.catDrag;
+      const toCat = toEl.dataset.catDrag;
+      const order = State.orderedCategories().filter((c) => c !== fromCat);
+      const targetIdx = order.indexOf(toCat);
       const insertAt = above ? targetIdx : targetIdx + 1;
-      order.splice(insertAt, 0, dragCatName);
+      order.splice(insertAt, 0, fromCat);
       State.setCatOrder(order);
       rerenderKeepScroll();
-    });
+    }
   });
 
-  // Drag-and-drop reorder for bills within category (desktop).
-  let dragId = null;
-  let dragCat = null;
-  $$('.bill-row').forEach((row) => {
-    row.addEventListener('dragstart', (e) => {
-      dragId = row.dataset.id;
-      dragCat = row.closest('.cat-group')?.dataset.cat || null;
-      row.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', dragId); } catch {}
-    });
-    row.addEventListener('dragend', () => {
-      row.classList.remove('dragging');
-      $$('.bill-row.drag-over-top, .bill-row.drag-over-bottom').forEach((n) => n.classList.remove('drag-over-top', 'drag-over-bottom'));
-      dragId = null; dragCat = null;
-    });
-    row.addEventListener('dragover', (e) => {
-      if (!dragId || row.dataset.id === dragId) return;
-      const cat = row.closest('.cat-group')?.dataset.cat;
-      if (cat !== dragCat) return; // only within same category
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      const rect = row.getBoundingClientRect();
-      const above = (e.clientY - rect.top) < rect.height / 2;
-      row.classList.toggle('drag-over-top', above);
-      row.classList.toggle('drag-over-bottom', !above);
-    });
-    row.addEventListener('dragleave', () => {
-      row.classList.remove('drag-over-top', 'drag-over-bottom');
-    });
-    row.addEventListener('drop', (e) => {
-      if (!dragId || row.dataset.id === dragId) return;
-      const cat = row.closest('.cat-group')?.dataset.cat;
-      if (cat !== dragCat) return;
-      e.preventDefault();
-      const rect = row.getBoundingClientRect();
-      const above = (e.clientY - rect.top) < rect.height / 2;
+  // Bill rows reorderable within their category
+  makeReorderable($$('.bill-row'), {
+    groupOf: (row) => row.closest('.cat-group')?.dataset.cat,
+    onDrop: (fromEl, toEl, above) => {
+      const cat = fromEl.closest('.cat-group')?.dataset.cat;
       const rows = $$(`.cat-group[data-cat="${CSS.escape(cat)}"] .bill-row`);
-      const ids = rows.map((r) => r.dataset.id).filter((id) => id !== dragId);
-      const targetIdx = ids.indexOf(row.dataset.id);
+      const ids = rows.map((r) => r.dataset.id).filter((id) => id !== fromEl.dataset.id);
+      const targetIdx = ids.indexOf(toEl.dataset.id);
       const insertAt = above ? targetIdx : targetIdx + 1;
-      ids.splice(insertAt, 0, dragId);
+      ids.splice(insertAt, 0, fromEl.dataset.id);
       State.reorderBillsInCategory(cat, ids);
       rerenderKeepScroll();
-    });
+    }
   });
   $$('[data-del]').forEach((b) => {
     b.onclick = (e) => {
