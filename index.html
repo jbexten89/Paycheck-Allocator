@@ -922,17 +922,22 @@ route('bills', (root) => {
     });
     row.addEventListener('keypress', (e) => { if (e.key === 'Enter') openBillEditor(row.dataset.id); });
   });
+  const rerenderKeepScroll = () => {
+    const y = window.scrollY;
+    navigate();
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  };
   $$('[data-move-up]').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); State.moveCat(btn.dataset.moveUp, -1); navigate(); };
+    btn.onclick = (e) => { e.stopPropagation(); State.moveCat(btn.dataset.moveUp, -1); rerenderKeepScroll(); };
   });
   $$('[data-move-down]').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); State.moveCat(btn.dataset.moveDown, +1); navigate(); };
+    btn.onclick = (e) => { e.stopPropagation(); State.moveCat(btn.dataset.moveDown, +1); rerenderKeepScroll(); };
   });
   $$('[data-bill-up]').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); State.moveBill(btn.dataset.billUp, -1); navigate(); };
+    btn.onclick = (e) => { e.stopPropagation(); State.moveBill(btn.dataset.billUp, -1); rerenderKeepScroll(); };
   });
   $$('[data-bill-down]').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); State.moveBill(btn.dataset.billDown, +1); navigate(); };
+    btn.onclick = (e) => { e.stopPropagation(); State.moveBill(btn.dataset.billDown, +1); rerenderKeepScroll(); };
   });
   $$('[data-del]').forEach((b) => {
     b.onclick = (e) => {
