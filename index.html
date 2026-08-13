@@ -346,7 +346,8 @@
   td.total { font-weight: 700; color: var(--good); }
   tr.row-muted td { color: var(--ink-muted); opacity: 0.55; }
   tr.row-muted td.total { color: var(--ink-muted); font-weight: 500; }
-  .sched-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+  .sched-dot { display: inline-block; width: 6px; height: 6px; margin-right: 8px; vertical-align: middle; }
+  .schedule-wrap table.schedule td.cyc-1 { background: rgba(59,130,246,0.08); }
   tr.sched-cat-header td {
     background: var(--paper);
     padding: 6px 0 !important;
@@ -1770,9 +1771,14 @@ route('schedule', (root) => {
                   `;
                   const billRows = bills.map((b) => {
                     const idx = billOrder.indexOf(b);
+                    // Alternate cell-shading per bill cycle so grouped paychecks are visible.
+                    let cycleKey = null; let parity = 0;
                     const cells = perPaycheck.map((p) => {
                       const it = p.items.find((x) => x.billId === b.id);
-                      return `<td>${it ? fmtUSD.format(it.amount) : '—'}</td>`;
+                      if (!it) { cycleKey = null; return `<td>—</td>`; }
+                      const key = it.dueDate.toISOString();
+                      if (key !== cycleKey) { parity ^= 1; cycleKey = key; }
+                      return `<td class="cyc-${parity}">${fmtUSD.format(it.amount)}</td>`;
                     }).join('');
                     const detail = perPaycheck.map((p) => {
                       const it = p.items.find((x) => x.billId === b.id);
