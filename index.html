@@ -173,7 +173,7 @@
   /* Bills */
   .bill-row {
     display: grid;
-    grid-template-columns: 6px 1fr auto auto auto;
+    grid-template-columns: 6px 1fr auto auto;
     gap: 10px;
     align-items: center;
     padding: 4px 12px;
@@ -886,7 +886,6 @@ route('bills', (root) => {
                         <button class="bill-move" data-bill-down="${b.id}" aria-label="Move down" ${bLast ? 'disabled' : ''}>▼</button>
                       </div>
                       <div class="bill-amount">${fmtUSD.format(b.amount)}</div>
-                      <button class="delete-btn" data-del="${b.id}" aria-label="Delete">Delete</button>
                     </div>
                     `;
                   }).join('')}
