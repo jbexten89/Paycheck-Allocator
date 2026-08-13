@@ -168,11 +168,12 @@
   .summary .value.neutral { color: var(--ink); }
   .summary .value.amber { color: var(--amber); }
   .summary .hint { font-size: 11px; color: var(--ink-muted); margin-top: 10px; line-height: 1.25; }
-  .pay-nav { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+  .pay-nav { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: nowrap; min-width: 0; }
+  .pay-nav .value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 14px !important; }
   .pay-arrow {
     background: transparent; border: 1px solid var(--hairline);
-    color: var(--ink); width: 24px; height: 24px;
-    border-radius: 6px; font-size: 16px; line-height: 1;
+    color: var(--ink); width: 22px; height: 22px;
+    border-radius: 6px; font-size: 14px; line-height: 1;
     display: inline-flex; align-items: center; justify-content: center;
     padding: 0; cursor: pointer; flex-shrink: 0;
   }
@@ -1069,7 +1070,7 @@ route('dashboard', (root) => {
         <div class="label">${offset === 0 ? 'Next pay date' : (offset < 0 ? 'Previous pay date' : 'Upcoming pay date')}</div>
         <div class="pay-nav">
           <button class="pay-arrow" id="pay-back" aria-label="Previous pay period" ${canBack ? '' : 'disabled'}>‹</button>
-          <span class="value neutral" style="font-size:16px;">${next ? fmtDate.format(next.payDate) : '—'}</span>
+          <span class="value neutral">${next ? fmtDateShort.format(next.payDate) : '—'}</span>
           <button class="pay-arrow" id="pay-fwd" aria-label="Next pay period" ${canFwd ? '' : 'disabled'}>›</button>
           ${offset !== 0 ? `<button class="btn today-chip" id="pay-today">today</button>` : ''}
         </div>
