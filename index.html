@@ -268,6 +268,11 @@
   /* Schedule table */
   .schedule-wrap { overflow-x: auto; border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--paper-2); }
   table.schedule { border-collapse: separate; border-spacing: 0; width: 100%; }
+  .schedule-wrap table.schedule { width: auto; min-width: 100%; }
+  .schedule-wrap table.schedule th:not(:first-child):not(:last-child),
+  .schedule-wrap table.schedule td:not(:first-child):not(:last-child) { min-width: 88px; }
+  .schedule-wrap table.schedule th:last-child,
+  .schedule-wrap table.schedule td:last-child { min-width: 96px; }
   table.schedule th, table.schedule td { padding: 3px 6px; border-bottom: 1px solid var(--hairline); text-align: right; font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; height: 26px; line-height: 1.15; background: var(--paper-2); }
   table.schedule th:first-child, table.schedule td:first-child { padding-left: 12px; }
   table.schedule th:last-child, table.schedule td:last-child { padding-right: 12px; }
@@ -1221,8 +1226,10 @@ function openBillEditor(id) {
 }
 
 route('schedule', (root) => {
-  let count = 3;
+  let count = parseInt(sessionStorage.getItem('sched.count') || '6', 10);
+  if (![6, 12, 26].includes(count)) count = 6;
   const render = () => {
+    sessionStorage.setItem('sched.count', count);
     const payDates = State.paySchedule(count);
     const { perPaycheck, byBill } = computeAllocations(State.bills, payDates);
     const activeBills = State.bills.filter((b) => b.amount > 0);
@@ -1241,6 +1248,9 @@ route('schedule', (root) => {
         <div>
           <h1>Pay Schedule</h1>
           <div class="sub">Per-bill allocations across upcoming paychecks. Click a row for running balances.</div>
+        </div>
+        <div class="segmented" role="radiogroup" aria-label="Periods">
+          ${[6, 12, 26].map((n) => `<button data-n="${n}" class="${n===count?'active':''}">${n}</button>`).join('')}
         </div>
       </div>
 
@@ -1320,6 +1330,7 @@ route('schedule', (root) => {
           </div>`
       }
     `;
+    $$('.segmented button').forEach((b) => b.onclick = () => { count = parseInt(b.dataset.n, 10); render(); });
     $$('tr.expandable').forEach((tr) => tr.onclick = () => {
       const det = root.querySelector(`tr[data-detail-for="${tr.dataset.i}"]`);
       if (det) det.style.display = det.style.display === 'none' ? 'table-row' : 'none';
