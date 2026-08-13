@@ -696,6 +696,17 @@ function computeAllocations(bills, payDates) {
     let cycleIndex = 0;          // 0 = first cycle (uses initialSaved), 1+ subsequent
     let lastDueKey = null;       // used to detect crossing into a new cycle
 
+    // If the bill has an anchor-based recurrence and its anchor date is before the
+    // first pay date in the schedule, treat that anchor's due as already resolved
+    // (funded by initialSaved). Skip crediting initialSaved to the next cycle.
+    if ((bill.recurrence === 'everyNMonths' || bill.recurrence === 'everyNWeeks') && bill.dueAnchor) {
+      const anchor = parseISO(bill.dueAnchor);
+      if (anchor <= payDates[0]) {
+        cycleIndex = 1;
+        runningBalance = 0;
+      }
+    }
+
     for (let i = 0; i < payDates.length; i++) {
       const P = payDates[i];
       const { D, prevDue } = nextDueCycleFor(bill, P);
