@@ -1248,23 +1248,17 @@ route('dashboard', (root) => {
                 const itemByBillId = new Map(nextItems.map((it) => [it.billId, it]));
                 // Build list of bills to render.
                 let billsToRender;
-                const savedFor = (billId) => {
-                  const b = State.bills.find((x) => x.id === billId);
-                  return b ? Number(b.initialSaved || 0) : 0;
-                };
                 if (State.showZeroBills) {
                   billsToRender = State.bills.filter((b) => b.amount > 0).map((b) => ({
                     billId: b.id,
                     name: b.name,
                     dueDate: (itemByBillId.get(b.id) || {}).dueDate,
                     amount: (itemByBillId.get(b.id) || {}).amount || 0,
-                    saved: Number(b.initialSaved || 0),
                     category: catFor(b)
                   }));
                 } else {
                   billsToRender = nextItems.map((it) => ({
                     billId: it.billId, name: it.name, dueDate: it.dueDate, amount: it.amount,
-                    saved: savedFor(it.billId),
                     category: catFor(State.bills.find((x) => x.id === it.billId) || {})
                   }));
                 }
@@ -1279,7 +1273,7 @@ route('dashboard', (root) => {
                   const activeCount = items.filter((it) => it.amount > 0).length;
                   const header = `
                     <tr class="sched-cat-header">
-                      <td colspan="5">
+                      <td colspan="4">
                         <span class="cat-name">${escapeHtml(cat)}</span>
                         <span class="cat-meta">${activeCount}${State.showZeroBills && activeCount !== items.length ? '/' + items.length : ''} bill${items.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
                       </td>
@@ -1289,18 +1283,16 @@ route('dashboard', (root) => {
                     <tr${it.amount === 0 ? ' class="row-muted"' : ''}>
                       <td>${escapeHtml(it.name)}</td>
                       <td>${it.dueDate ? fmtDateShort.format(it.dueDate) : '—'}</td>
-                      <td>${it.saved > 0 ? fmtUSD.format(it.saved) : '—'}</td>
                       <td class="total">${fmtUSD.format(it.amount)}</td>
                     </tr>
                   `).join('');
                   return header + rows;
                 }).join('');
-                const totalSaved = billsToRender.reduce((s, it) => s + (it.saved || 0), 0);
                 return `<div style="overflow-x:auto;"><table class="schedule" style="min-width:0;">
-                  <thead><tr><th>Bill</th><th>Due</th><th>Saved</th><th>Allocate</th></tr></thead>
+                  <thead><tr><th>Bill</th><th>Due</th><th>Allocate</th></tr></thead>
                   <tbody>
                     ${rowsHtml}
-                    <tr class="sched-grand-total"><td colspan="2" style="text-align:right;">Total</td><td>${fmtUSD.format(totalSaved)}</td><td class="total">${fmtUSD.format(next ? next.total : 0)}</td></tr>
+                    <tr class="sched-grand-total"><td colspan="2" style="text-align:right;">Total</td><td class="total">${fmtUSD.format(next ? next.total : 0)}</td></tr>
                   </tbody>
                 </table></div>`;
               })()
