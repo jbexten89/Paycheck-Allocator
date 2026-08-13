@@ -678,6 +678,27 @@ function computeAllocations(bills, payDates) {
 }
 
 /* ------------------------- State ------------------------- */
+function defaultMonthlyBills() {
+  const mk = (name, dueDay, amount) => ({ id: crypto.randomUUID(), name, dueDay, amount, initialSaved: 0, category: 'Monthly' });
+  return [
+    mk('Mortgage',         1,  1730.00),
+    mk('Music',            2,  21.44),
+    mk('Inst Sol Premium', 4,  1.65),
+    mk('Natural Gas',      8,  100.00),
+    mk('Electric',         10, 250.00),
+    mk('Internet',         16, 50.00),
+    mk('Cell',             17, 125.00),
+    mk('Cell',             17, 96.18),
+    mk('Sewer',            22, 52.00),
+    mk('Equity Loan',      22, 1000.00),
+    mk('Sallie Mae Loan',  22, 75.00),
+    mk('YouTube TV',       23, 89.00),
+    mk('Hulu',             28, 21.44),
+    mk('Auto Ins',         28, 110.16),
+    mk('Photo Ins',        28, 34.17)
+  ];
+}
+
 const State = {
   bills: [],
   payStart: '2026-05-01',
@@ -701,24 +722,7 @@ const State = {
     try { this.collapsedCats = new Set(JSON.parse(localStorage.getItem(STORE.collapsedCats) || '[]')); }
     catch { this.collapsedCats = new Set(); }
     if (!localStorage.getItem(STORE.seeded)) {
-      const mk = (name, dueDay, amount) => ({ id: crypto.randomUUID(), name, dueDay, amount, initialSaved: 0, category: 'Monthly' });
-      this.bills = [
-        mk('Mortgage',         1,  1730.00),
-        mk('Music',            2,  21.44),
-        mk('Inst Sol Premium', 4,  1.65),
-        mk('Natural Gas',      8,  100.00),
-        mk('Electric',         10, 250.00),
-        mk('Internet',         16, 50.00),
-        mk('Cell',             17, 125.00),
-        mk('Cell',             17, 96.18),
-        mk('Sewer',            22, 52.00),
-        mk('Equity Loan',      22, 1000.00),
-        mk('Sallie Mae Loan',  22, 75.00),
-        mk('YouTube TV',       23, 89.00),
-        mk('Hulu',             28, 21.44),
-        mk('Auto Ins',         28, 110.16),
-        mk('Photo Ins',        28, 34.17)
-      ];
+      this.bills = defaultMonthlyBills();
       localStorage.setItem(STORE.seeded, '1');
       this.saveBills();
     }
@@ -1487,6 +1491,7 @@ route('settings', (root) => {
           <button class="btn" id="export">Export JSON</button>
           <label class="btn" for="import-file">Import JSON</label>
           <input id="import-file" type="file" accept="application/json" style="display:none;" />
+          <button class="btn" id="load-defaults">Load default bills</button>
           <button class="btn btn-danger" id="clear-all">Clear all data</button>
         </div>
         <div class="hint" style="margin-top:10px;color:var(--ink-muted);font-size:12px;">Bills are stored in your browser. Use Export regularly as a backup.</div>
@@ -1532,6 +1537,14 @@ route('settings', (root) => {
     };
     reader.readAsText(file);
     e.target.value = '';
+  };
+  $('#load-defaults').onclick = () => {
+    const defaults = defaultMonthlyBills();
+    confirmDialog(`Add ${defaults.length} default Monthly bills to your list? Existing bills stay put.`, () => {
+      State.bills = [...State.bills, ...defaults];
+      State.saveBills();
+      navigate();
+    });
   };
   $('#clear-all').onclick = () => {
     confirmDialog('Permanently delete all bills and reset settings?', () => {
