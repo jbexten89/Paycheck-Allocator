@@ -201,7 +201,9 @@
   }
   .bill-row:hover { background: var(--paper); }
   .bill-row:last-child { border-bottom: none; }
-  .bill-row { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+  .bill-row { touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  body.drag-lock { touch-action: none !important; overflow: hidden !important; }
+  body.drag-lock * { touch-action: none !important; }
   .bill-row.reorder-source { opacity: 0.3; }
   .bill-row.drag-over-top { box-shadow: inset 0 2px 0 var(--amber); }
   .bill-row.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--amber); }
@@ -1185,7 +1187,15 @@ route('bills', (root) => {
           if (isTouch && navigator.vibrate) { try { navigator.vibrate(20); } catch {} }
         };
 
-        if (isTouch) holdTimer = setTimeout(() => { armed = true; start(); }, 350);
+        const lockScroll = () => {
+          document.body.classList.add('drag-lock');
+          document.documentElement.style.overflow = 'hidden';
+        };
+        const unlockScroll = () => {
+          document.body.classList.remove('drag-lock');
+          document.documentElement.style.overflow = '';
+        };
+        if (isTouch) holdTimer = setTimeout(() => { armed = true; lockScroll(); start(); }, 350);
 
         const clearIndicators = () => items.forEach((n) => n.classList.remove('drag-over-top', 'drag-over-bottom'));
 
@@ -1197,7 +1207,7 @@ route('bills', (root) => {
             if (Math.hypot(dx, dy) > 8) { clearTimeout(holdTimer); cancelled = true; cleanup(); }
             return;
           }
-          if (!ghost && Math.hypot(dx, dy) > 4) start();
+          if (!ghost && Math.hypot(dx, dy) > 4) { lockScroll(); start(); }
           if (!ghost) return;
           me.preventDefault();
           ghost.style.transform = `translate(${dx}px, ${dy}px) scale(1.02)`;
@@ -1245,6 +1255,7 @@ route('bills', (root) => {
         const cleanup = () => {
           if (ghost) { ghost.remove(); ghost = null; }
           item.classList.remove('reorder-source');
+          unlockScroll();
         };
 
         try { item.setPointerCapture?.(e.pointerId); } catch {}
