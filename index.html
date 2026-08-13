@@ -275,12 +275,15 @@
   .schedule-wrap table.schedule th:first-child,
   .schedule-wrap table.schedule td:first-child {
     min-width: 160px;
-    position: sticky; left: 0; z-index: 4;
+    position: sticky; left: 0; z-index: 20;
+    background: var(--paper-2) !important;
     box-shadow: 1px 0 0 var(--hairline);
   }
-  .schedule-wrap table.schedule thead th { position: sticky; top: 0; z-index: 3; }
-  .schedule-wrap table.schedule thead th:first-child { z-index: 5; }
-  .schedule-wrap table.schedule tr.sched-cat-header td:first-child { z-index: 4; }
+  .schedule-wrap table.schedule thead th { position: sticky; top: 0; z-index: 10; background: var(--paper-2); }
+  .schedule-wrap table.schedule thead th:first-child { z-index: 30; }
+  .schedule-wrap table.schedule tr.sched-cat-header td:first-child { z-index: 20; background: var(--paper) !important; }
+  .schedule-wrap table.schedule tr.expandable:hover td:first-child { background: var(--paper) !important; }
+  .schedule-wrap table.schedule tr.expanded-detail td:first-child { background: var(--paper) !important; }
   table.schedule tr.expandable:hover td { background: var(--paper); }
   table.schedule tr.expanded-detail td { background: var(--paper); }
   table.schedule th { background: transparent; font-weight: 500; color: var(--ink-muted); font-size: 11px; letter-spacing: 0.02em; }
