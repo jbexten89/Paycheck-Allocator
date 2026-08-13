@@ -462,7 +462,8 @@ const STORE = {
   catOrder: 'paycheck_allocator.cat_order',
   lastCat: 'paycheck_allocator.last_category',
   billOrder: 'paycheck_allocator.bill_order',
-  schedCount: 'paycheck_allocator.sched_count'
+  schedCount: 'paycheck_allocator.sched_count',
+  payAmount: 'paycheck_allocator.pay_amount'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -670,6 +671,7 @@ const State = {
     catch { this.billOrder = []; }
     const sc = parseInt(localStorage.getItem(STORE.schedCount) || '6', 10);
     this.schedCount = [6, 12, 26].includes(sc) ? sc : 6;
+    this.payAmount = parseFloat(localStorage.getItem(STORE.payAmount) || '0') || 0;
     if (!localStorage.getItem(STORE.seeded)) {
       this.bills = [
         { id: crypto.randomUUID(), name: 'Rent',          dueDay: 1,  amount: 1500, initialSaved: 0, category: 'Housing',   color: '#8C5E3C' },
@@ -696,6 +698,7 @@ const State = {
   },
   setBillOrder(arr) { this.billOrder = arr; localStorage.setItem(STORE.billOrder, JSON.stringify(arr)); },
   setSchedCount(n) { this.schedCount = n; localStorage.setItem(STORE.schedCount, String(n)); },
+  setPayAmount(n) { this.payAmount = n; localStorage.setItem(STORE.payAmount, String(n)); },
   orderedBillsInCategory(cat) {
     const inCat = this.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat);
     const idx = (id) => {
@@ -844,7 +847,11 @@ route('dashboard', (root) => {
       <div class="card">
         <div class="label">Set aside next pay</div>
         <div class="value amber">${fmtUSD.format(next ? next.total : 0)}</div>
-        <div class="hint">across ${next ? next.items.length : 0} bill${next && next.items.length === 1 ? '' : 's'}</div>
+        <div class="hint">${
+          State.payAmount > 0 && next
+            ? `of ${fmtUSD.format(State.payAmount)} · ${fmtUSD.format(Math.max(0, State.payAmount - next.total))} leftover`
+            : `across ${next ? next.items.length : 0} bill${next && next.items.length === 1 ? '' : 's'}`
+        }</div>
       </div>
     </div>
 
@@ -1363,6 +1370,10 @@ route('settings', (root) => {
             ${[6,12,26].map((n) => `<option value="${n}" ${n===State.schedCount?'selected':''}>${n}</option>`).join('')}
           </select>
         </div>
+        <div style="margin-top:14px;">
+          <label>Paycheck amount (net)</label>
+          <input id="pay-amount" type="number" min="0" step="0.01" value="${State.payAmount || ''}" placeholder="e.g. 2500" />
+        </div>
       </div>
       <div class="card">
         <h2>Appearance</h2>
@@ -1393,6 +1404,7 @@ route('settings', (root) => {
   $('#pay-start').onchange = (e) => { State.setPayStart(e.target.value); };
   $('#freq').onchange = (e) => { State.setFrequency(e.target.value); };
   $('#sched-count').onchange = (e) => { State.setSchedCount(parseInt(e.target.value, 10)); };
+  $('#pay-amount').onchange = (e) => { State.setPayAmount(parseFloat(e.target.value) || 0); };
   $('#theme').onchange = (e) => { State.setTheme(e.target.value); };
 
   $('#export').onclick = () => {
