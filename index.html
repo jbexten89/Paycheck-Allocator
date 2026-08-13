@@ -909,7 +909,6 @@ route('bills', (root) => {
           }).join('');
         })()
     }
-    ${testsBlock()}
   `;
   $('#add-bill').onclick = () => openBillEditor(null);
   $$('.bill-row').forEach((row) => {
@@ -948,7 +947,6 @@ route('bills', (root) => {
     };
   });
   attachFab();
-  wireTests(root);
 });
 
 function openBillEditor(id) {
@@ -1204,14 +1202,12 @@ route('schedule', (root) => {
             </table>
           </div>`
       }
-      ${testsBlock()}
     `;
     $$('tr.expandable').forEach((tr) => tr.onclick = () => {
       const det = root.querySelector(`tr[data-detail-for="${tr.dataset.i}"]`);
       if (det) det.style.display = det.style.display === 'none' ? 'table-row' : 'none';
     });
     attachFab(false);
-    wireTests(root);
   };
   render();
 });
