@@ -218,13 +218,19 @@
   .cat-header {
     display: flex; align-items: baseline; justify-content: flex-start; gap: 10px;
     padding: 8px 12px;
-    background: var(--paper-2);
+    background: var(--paper);
     border: 1px solid var(--hairline);
     border-left: 3px solid var(--amber);
-    border-radius: var(--radius-lg);
-    margin-bottom: 6px;
+    border-bottom: none;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    margin-bottom: 0;
     position: relative;
     user-select: none;
+  }
+  .cat-group .bill-list {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-left: 3px solid var(--amber);
   }
   .cat-header { touch-action: pan-y; }
   .cat-header::before {
