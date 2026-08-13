@@ -698,6 +698,97 @@ function defaultMonthlyBills() {
     mk('Photo Ins',        28, 34.17)
   ];
 }
+function defaultNonMonthlyBills() {
+  const a = (name, dueDay, amount, dueAnchor, intervalMonths) => ({ id: crypto.randomUUID(), name, dueDay, amount, initialSaved: 0, category: 'Non-Monthly', recurrence: 'everyNMonths', intervalMonths, dueAnchor });
+  const w = (name, amount, intervalWeeks, dueAnchor) => ({ id: crypto.randomUUID(), name, dueDay: 1, amount, initialSaved: 0, category: 'Non-Monthly', recurrence: 'everyNWeeks', intervalWeeks, dueAnchor });
+  const m = (name, dueDay, amount) => ({ id: crypto.randomUUID(), name, dueDay, amount, initialSaved: 0, category: 'Non-Monthly' });
+  return [
+    m('Taxes', 15, 0),
+    m('Medical/Dental/Vision', 1, 0),
+    a('Registration',     1,  29.43, '2027-03-01', 12),
+    a('License',          1,  0.76,  '2027-03-01', 12),
+    w('Haircut',          40.00, 3, '2026-08-13'),
+    a('Life Ins',         1,  18.00, '2027-03-01', 6),
+    a('Gerber Life',      8,  8.75,  '2027-02-08', 2),
+    a('Jewelry Ins',      4,  47.47, '2026-10-04', 12),
+    a('Garbage',          10, 41.22, '2027-03-10', 3),
+    a('Propane',          27, 32.25, '2027-01-27', 4),
+    a('Tax Prep',         28, 20.00, '2027-02-28', 12),
+    a('EZPass',           12, 5.00,  '2027-02-12', 4)
+  ];
+}
+function defaultFunStuffBills() {
+  const mk = (name, dueDay, amount) => ({ id: crypto.randomUUID(), name, dueDay, amount, initialSaved: 0, category: 'Fun Stuff' });
+  return [
+    mk('CFB - Go Blue!',            1, 0),
+    mk('MLB Stadium Tour',          1, 0),
+    mk('Entertainment',             1, 25.00),
+    mk('Rotary Reverse Raffle',     1, 30.00),
+    mk('Mongo Trip',                1, 16.67),
+    mk('Halloween',                 1, 15.00),
+    mk('Misc Gifts',                1, 0)
+  ];
+}
+function default3DPrintingBills() {
+  const mk = (name) => ({ id: crypto.randomUUID(), name, dueDay: 1, amount: 0, initialSaved: 0, category: '3D Printing' });
+  return ['Budget','Tools','X1 Carbon Printer','AMS','Shipping','Accessories','Filament'].map(mk);
+}
+function defaultSubscriptionBills() {
+  const a = (name, dueDay, amount, dueAnchor, intervalMonths = 12) => ({ id: crypto.randomUUID(), name, dueDay, amount, initialSaved: 0, category: 'Subscriptions', recurrence: 'everyNMonths', intervalMonths, dueAnchor });
+  const m = (name, amount) => ({ id: crypto.randomUUID(), name, dueDay: 1, amount, initialSaved: 0, category: 'Subscriptions' });
+  return [
+    a('Tessie',          15, 4.47, '2027-01-15'),
+    a('Amazon Prime',    27, 12.43, '2027-01-27'),
+    a('1Password',       16, 2.99, '2027-03-16'),
+    a('Office 365 Family',8, 8.14, '2027-04-08'),
+    a('reMarkable',      17, 2.58, '2027-04-17'),
+    a('YNAB',            3,  9.09, '2027-05-03'),
+    a('Zerosum',         10, 2.09, '2027-05-10'),
+    a('AnyList',         2,  1.34, '2027-08-02'),
+    a("Harry's",         8,  5.37, '2027-02-08', 3),
+    a('ReciMe',          14, 2.50, '2026-09-14'),
+    a('Blue Iris',       24, 2.68, '2026-09-24'),
+    a('Luminous',        26, 1.79, '2027-01-26', 3),
+    a('My Radar',        28, 0.90, '2026-09-28'),
+    a('Settle Up',       30, 1.58, '2026-09-30'),
+    a('Life 360',        12, 4.47, '2026-11-12'),
+    a('Teslafi',         29, 4.17, '2026-12-29'),
+    a('Tesla Premium',   30, 8.85, '2026-12-30'),
+    m('Misc Sub',        0)
+  ];
+}
+function defaultMaintHomeBills() {
+  const a = (name, dueDay, amount, dueAnchor, intervalMonths) => ({ id: crypto.randomUUID(), name, dueDay, amount, initialSaved: 0, category: 'Maint Home', recurrence: 'everyNMonths', intervalMonths, dueAnchor });
+  const m = (name, dueDay, amount) => ({ id: crypto.randomUUID(), name, dueDay, amount, initialSaved: 0, category: 'Maint Home' });
+  return [
+    m('Home Improvement',   1, 0),
+    m('General Fund',       1, 0),
+    a('Generator Maint',    18, 20.00, '2027-05-18', 12),
+    a('Softener Salt',      19, 20.00, '2027-02-19', 3),
+    a('Water Filters',      7,  10.00, '2027-04-07', 6),
+    a('Furnace Filters',    23, 6.67,  '2027-04-23', 12),
+    m('Lawn & Garden',      1,  25.00),
+    m('General Repairs',    1, 0),
+    m('Air Conditioner Maint', 1, 0),
+    m('Furnace Maint',      1, 0),
+    m('Well Maint',         1, 0),
+    m('Garage Door Maint',  1, 0),
+    m('Mailbox',            1, 0),
+    m('OSB for Garage',     1, 0)
+  ];
+}
+function defaultVehiclesBills() {
+  const mk = (name, amount) => ({ id: crypto.randomUUID(), name, dueDay: 1, amount, initialSaved: 0, category: 'Vehicles' });
+  return [
+    mk('Car Care',            0),
+    mk('Explorer Service',    10.00),
+    mk('Tesla Wheel Rotation',4.00),
+    mk('Washer Fluid',        2.00),
+    mk('Windshield Wipers',   5.00),
+    mk('Tesla Tires',         25.00),
+    mk('Explorer Tires',      25.00)
+  ];
+}
 function defaultFlexibleBills() {
   const anchor = toISO(new Date());
   const wk = (name, amount) => ({ id: crypto.randomUUID(), name, dueDay: 1, amount, initialSaved: 0, category: 'Flexible', recurrence: 'everyNWeeks', intervalWeeks: 1, dueAnchor: anchor });
@@ -1514,8 +1605,18 @@ route('settings', (root) => {
           <button class="btn" id="export">Export JSON</button>
           <label class="btn" for="import-file">Import JSON</label>
           <input id="import-file" type="file" accept="application/json" style="display:none;" />
-          <button class="btn" id="load-defaults">Load Monthly defaults</button>
-          <button class="btn" id="load-flexible">Load Flexible defaults</button>
+          <select id="load-template" style="max-width:200px;">
+            <option value="">Load template…</option>
+            <option value="all">All categories</option>
+            <option value="monthly">Monthly</option>
+            <option value="flexible">Flexible</option>
+            <option value="nonmonthly">Non-Monthly</option>
+            <option value="fun">Fun Stuff</option>
+            <option value="3d">3D Printing</option>
+            <option value="subs">Subscriptions</option>
+            <option value="maint">Maint Home</option>
+            <option value="vehicles">Vehicles</option>
+          </select>
           <button class="btn btn-danger" id="clear-all">Clear all data</button>
         </div>
         <div class="hint" style="margin-top:10px;color:var(--ink-muted);font-size:12px;">Bills are stored in your browser. Use Export regularly as a backup.</div>
@@ -1562,21 +1663,35 @@ route('settings', (root) => {
     reader.readAsText(file);
     e.target.value = '';
   };
-  $('#load-defaults').onclick = () => {
-    const defaults = defaultMonthlyBills();
-    confirmDialog(`Add ${defaults.length} default Monthly bills to your list? Existing bills stay put.`, () => {
-      State.bills = [...State.bills, ...defaults];
-      State.saveBills();
-      navigate();
-    });
+  const templateFns = {
+    monthly:    { label: 'Monthly',     fn: defaultMonthlyBills },
+    flexible:   { label: 'Flexible',    fn: defaultFlexibleBills },
+    nonmonthly: { label: 'Non-Monthly', fn: defaultNonMonthlyBills },
+    fun:        { label: 'Fun Stuff',   fn: defaultFunStuffBills },
+    '3d':       { label: '3D Printing', fn: default3DPrintingBills },
+    subs:       { label: 'Subscriptions', fn: defaultSubscriptionBills },
+    maint:      { label: 'Maint Home',  fn: defaultMaintHomeBills },
+    vehicles:   { label: 'Vehicles',    fn: defaultVehiclesBills }
   };
-  $('#load-flexible').onclick = () => {
-    const defaults = defaultFlexibleBills();
-    confirmDialog(`Add ${defaults.length} default Flexible bills to your list? Existing bills stay put.`, () => {
-      State.bills = [...State.bills, ...defaults];
+  $('#load-template').onchange = (e) => {
+    const key = e.target.value;
+    if (!key) return;
+    let bills, label;
+    if (key === 'all') {
+      bills = Object.values(templateFns).flatMap((t) => t.fn());
+      label = 'all categories';
+    } else if (templateFns[key]) {
+      bills = templateFns[key].fn();
+      label = templateFns[key].label;
+    } else {
+      e.target.value = ''; return;
+    }
+    confirmDialog(`Add ${bills.length} default ${label} bills to your list? Existing bills stay put.`, () => {
+      State.bills = [...State.bills, ...bills];
       State.saveBills();
       navigate();
     });
+    e.target.value = '';
   };
   $('#clear-all').onclick = () => {
     confirmDialog('Permanently delete all bills and reset settings?', () => {
