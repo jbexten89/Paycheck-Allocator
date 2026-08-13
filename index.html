@@ -701,11 +701,23 @@ const State = {
     try { this.collapsedCats = new Set(JSON.parse(localStorage.getItem(STORE.collapsedCats) || '[]')); }
     catch { this.collapsedCats = new Set(); }
     if (!localStorage.getItem(STORE.seeded)) {
+      const mk = (name, dueDay, amount) => ({ id: crypto.randomUUID(), name, dueDay, amount, initialSaved: 0, category: 'Monthly' });
       this.bills = [
-        { id: crypto.randomUUID(), name: 'Rent',          dueDay: 1,  amount: 1500, initialSaved: 0, category: 'Housing',   color: '#8C5E3C' },
-        { id: crypto.randomUUID(), name: 'Car Insurance', dueDay: 10, amount: 165,  initialSaved: 0, category: 'Auto',      color: '#3C5A7B' },
-        { id: crypto.randomUUID(), name: 'Electric',      dueDay: 15, amount: 120,  initialSaved: 0, category: 'Utilities', color: '#B8860B' },
-        { id: crypto.randomUUID(), name: 'Internet',      dueDay: 20, amount: 80,   initialSaved: 0, category: 'Utilities', color: '#5C7A4E' }
+        mk('Mortgage',         1,  1730.00),
+        mk('Music',            2,  21.44),
+        mk('Inst Sol Premium', 4,  1.65),
+        mk('Natural Gas',      8,  100.00),
+        mk('Electric',         10, 250.00),
+        mk('Internet',         16, 50.00),
+        mk('Cell',             17, 125.00),
+        mk('Cell',             17, 96.18),
+        mk('Sewer',            22, 52.00),
+        mk('Equity Loan',      22, 1000.00),
+        mk('Sallie Mae Loan',  22, 75.00),
+        mk('YouTube TV',       23, 89.00),
+        mk('Hulu',             28, 21.44),
+        mk('Auto Ins',         28, 110.16),
+        mk('Photo Ins',        28, 34.17)
       ];
       localStorage.setItem(STORE.seeded, '1');
       this.saveBills();
