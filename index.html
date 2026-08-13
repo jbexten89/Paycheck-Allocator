@@ -207,6 +207,10 @@
     display: flex; align-items: baseline; justify-content: space-between;
     padding: 0 4px 8px;
   }
+  .cat-header[draggable="true"] { cursor: grab; }
+  .cat-header.dragging { opacity: 0.4; cursor: grabbing; }
+  .cat-header.drag-over-top { box-shadow: 0 -2px 0 var(--amber); }
+  .cat-header.drag-over-bottom { box-shadow: 0 2px 0 var(--amber); }
   .cat-name {
     font-family: var(--sans); font-size: 11px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.08em;
@@ -898,19 +902,14 @@ route('bills', (root) => {
             (groups[k] ||= []).push(b);
           }
           const groupNames = State.orderedCategories();
-          return groupNames.map((cat, gi) => {
+          return groupNames.map((cat) => {
             const bills = State.orderedBillsInCategory(cat);
             const catTotal = bills.reduce((s, b) => s + (Number(b.amount) || 0), 0);
-            const isFirst = gi === 0, isLast = gi === groupNames.length - 1;
             return `
               <div class="cat-group" data-cat="${escapeAttr(cat)}">
-                <div class="cat-header">
+                <div class="cat-header" draggable="true" data-cat-drag="${escapeAttr(cat)}">
                   <span class="cat-name">${escapeHtml(cat)}</span>
-                  <span class="cat-controls">
-                    <span class="cat-meta">${bills.length} bill${bills.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
-                    <button class="cat-move" data-move-up="${escapeAttr(cat)}" aria-label="Move up" ${isFirst ? 'disabled' : ''}>▲</button>
-                    <button class="cat-move" data-move-down="${escapeAttr(cat)}" aria-label="Move down" ${isLast ? 'disabled' : ''}>▼</button>
-                  </span>
+                  <span class="cat-meta">${bills.length} bill${bills.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
                 </div>
                 <div class="bill-list" role="list">
                   ${bills.map((b) => `
@@ -948,13 +947,48 @@ route('bills', (root) => {
     navigate();
     requestAnimationFrame(() => window.scrollTo(0, y));
   };
-  $$('[data-move-up]').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); State.moveCat(btn.dataset.moveUp, -1); rerenderKeepScroll(); };
+  // Drag-and-drop reorder for category groups (desktop).
+  let dragCatName = null;
+  $$('[data-cat-drag]').forEach((hdr) => {
+    hdr.addEventListener('dragstart', (e) => {
+      dragCatName = hdr.dataset.catDrag;
+      hdr.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', 'cat:' + dragCatName); } catch {}
+      e.stopPropagation();
+    });
+    hdr.addEventListener('dragend', () => {
+      hdr.classList.remove('dragging');
+      $$('.cat-header.drag-over-top, .cat-header.drag-over-bottom').forEach((n) => n.classList.remove('drag-over-top', 'drag-over-bottom'));
+      dragCatName = null;
+    });
+    hdr.addEventListener('dragover', (e) => {
+      if (!dragCatName || hdr.dataset.catDrag === dragCatName) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = hdr.getBoundingClientRect();
+      const above = (e.clientY - rect.top) < rect.height / 2;
+      hdr.classList.toggle('drag-over-top', above);
+      hdr.classList.toggle('drag-over-bottom', !above);
+    });
+    hdr.addEventListener('dragleave', () => {
+      hdr.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+    hdr.addEventListener('drop', (e) => {
+      if (!dragCatName || hdr.dataset.catDrag === dragCatName) return;
+      e.preventDefault();
+      const rect = hdr.getBoundingClientRect();
+      const above = (e.clientY - rect.top) < rect.height / 2;
+      const order = State.orderedCategories().filter((c) => c !== dragCatName);
+      const targetIdx = order.indexOf(hdr.dataset.catDrag);
+      const insertAt = above ? targetIdx : targetIdx + 1;
+      order.splice(insertAt, 0, dragCatName);
+      State.setCatOrder(order);
+      rerenderKeepScroll();
+    });
   });
-  $$('[data-move-down]').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); State.moveCat(btn.dataset.moveDown, +1); rerenderKeepScroll(); };
-  });
-  // Drag-and-drop reorder (desktop).
+
+  // Drag-and-drop reorder for bills within category (desktop).
   let dragId = null;
   let dragCat = null;
   $$('.bill-row').forEach((row) => {
