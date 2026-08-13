@@ -396,6 +396,19 @@
     border: 1px solid var(--hairline);
     box-shadow: 0 24px 60px rgba(0,0,0,0.3);
   }
+  .modal-backdrop-full { padding: 0 !important; align-items: stretch !important; }
+  .modal.modal-full {
+    max-width: 100%;
+    width: 100%;
+    max-height: none;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    border: none;
+    display: flex;
+    flex-direction: column;
+  }
+  .modal.modal-full .modal-body { flex: 1; overflow-y: auto; }
   .modal-header { padding: 12px 18px 10px; border-bottom: 1px solid var(--hairline); display: flex; justify-content: space-between; align-items: center; }
   .modal-header h3 { font-size: 14px; margin: 0; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); font-weight: 600; }
   .modal-body { padding: 14px 20px; }
@@ -947,8 +960,8 @@ window.addEventListener('hashchange', navigate);
 function openModal(html, opts = {}) {
   const root = $('#modal-root');
   const back = document.createElement('div');
-  back.className = 'modal-backdrop';
-  back.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
+  back.className = 'modal-backdrop' + (opts.fullscreen ? ' modal-backdrop-full' : '');
+  back.innerHTML = `<div class="modal${opts.fullscreen ? ' modal-full' : ''}" role="dialog" aria-modal="true">${html}</div>`;
   root.appendChild(back);
   const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
@@ -1387,6 +1400,7 @@ function openBillEditor(id) {
       <button class="btn btn-primary" data-x="save">Save</button>
     </div>
   `, {
+    fullscreen: true,
     onMount(el, close) {
       const form = el.querySelector('#bill-form');
       const preview = el.querySelector('#preview');
