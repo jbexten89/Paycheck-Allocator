@@ -730,9 +730,12 @@ const State = {
   toggleCatCollapsed(cat) {
     if (this.collapsedCats.has(cat)) this.collapsedCats.delete(cat);
     else this.collapsedCats.add(cat);
-    localStorage.setItem(STORE.collapsedCats, JSON.stringify([...this.collapsedCats]));
+    this.persistCollapsed();
   },
   isCatCollapsed(cat) { return this.collapsedCats.has(cat); },
+  expandAllCats() { this.collapsedCats.clear(); this.persistCollapsed(); },
+  collapseAllCats(cats) { for (const c of cats) this.collapsedCats.add(c); this.persistCollapsed(); },
+  persistCollapsed() { localStorage.setItem(STORE.collapsedCats, JSON.stringify([...this.collapsedCats])); },
   orderedBillsInCategory(cat) {
     const inCat = this.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat);
     const idx = (id) => {
@@ -964,7 +967,10 @@ route('bills', (root) => {
         <h1>Bills</h1>
         <div class="sub">Your recurring monthly obligations.</div>
       </div>
-      <button class="btn btn-primary" id="add-bill">+ Add bill</button>
+      <div class="row" style="gap:8px;">
+        <button class="btn" id="toggle-all">${State.collapsedCats.size > 0 ? 'Expand all' : 'Collapse all'}</button>
+        <button class="btn btn-primary" id="add-bill">+ Add bill</button>
+      </div>
     </div>
     ${
       State.bills.length === 0
@@ -1011,6 +1017,16 @@ route('bills', (root) => {
     }
   `;
   $('#add-bill').onclick = () => openBillEditor(null);
+  const toggleAll = $('#toggle-all');
+  if (toggleAll) toggleAll.onclick = () => {
+    if (State.collapsedCats.size > 0) {
+      State.expandAllCats();
+    } else {
+      const allCats = State.orderedCategories();
+      State.collapseAllCats(allCats);
+    }
+    rerenderKeepScroll();
+  };
   $$('.bill-row').forEach((row) => {
     row.addEventListener('click', (e) => {
       if (e.target.closest('[data-del]')) return;
