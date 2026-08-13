@@ -1,0 +1,19 @@
+{
+  "name": "Paycheck Allocator",
+  "short_name": "Paychecks",
+  "description": "Calculate how much to set aside from each biweekly paycheck to cover monthly bills.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E1014",
+  "theme_color": "#3B82F6",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
