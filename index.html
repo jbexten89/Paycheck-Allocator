@@ -178,7 +178,7 @@
   /* Bills */
   .bill-row {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto;
     gap: 12px;
     align-items: center;
     padding: 10px 14px;
@@ -913,9 +913,7 @@ route('bills', (root) => {
                   </span>
                 </div>
                 <div class="bill-list" role="list">
-                  ${bills.map((b, bi) => {
-                    const bFirst = bi === 0, bLast = bi === bills.length - 1;
-                    return `
+                  ${bills.map((b) => `
                     <div class="bill-row" role="listitem" data-id="${b.id}" tabindex="0" draggable="true">
                       <div>
                         <span class="bill-name">${escapeHtml(b.name)}</span>
@@ -927,14 +925,9 @@ route('bills', (root) => {
                             : `Due ${b.dueDay}`
                         }${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}</span>
                       </div>
-                      <div class="bill-move-group">
-                        <button class="bill-move" data-bill-up="${b.id}" aria-label="Move up" ${bFirst ? 'disabled' : ''}>▲</button>
-                        <button class="bill-move" data-bill-down="${b.id}" aria-label="Move down" ${bLast ? 'disabled' : ''}>▼</button>
-                      </div>
                       <div class="bill-amount">${fmtUSD.format(b.amount)}</div>
                     </div>
-                    `;
-                  }).join('')}
+                  `).join('')}
                 </div>
               </div>
             `;
@@ -961,14 +954,7 @@ route('bills', (root) => {
   $$('[data-move-down]').forEach((btn) => {
     btn.onclick = (e) => { e.stopPropagation(); State.moveCat(btn.dataset.moveDown, +1); rerenderKeepScroll(); };
   });
-  $$('[data-bill-up]').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); State.moveBill(btn.dataset.billUp, -1); rerenderKeepScroll(); };
-  });
-  $$('[data-bill-down]').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); State.moveBill(btn.dataset.billDown, +1); rerenderKeepScroll(); };
-  });
-
-  // Drag-and-drop reorder (desktop). Touch users still have ▲▼.
+  // Drag-and-drop reorder (desktop).
   let dragId = null;
   let dragCat = null;
   $$('.bill-row').forEach((row) => {
