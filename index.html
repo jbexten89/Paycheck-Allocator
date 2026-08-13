@@ -333,11 +333,16 @@
     border: 1px solid var(--hairline);
     box-shadow: 0 24px 60px rgba(0,0,0,0.3);
   }
-  .modal-header { padding: 20px 24px 12px; border-bottom: 1px solid var(--hairline); display: flex; justify-content: space-between; align-items: center; }
-  .modal-body { padding: 20px 24px; }
-  .modal-footer { padding: 14px 24px; border-top: 1px solid var(--hairline); display: flex; gap: 8px; justify-content: flex-end; background: var(--paper); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
-  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+  .modal-header { padding: 12px 18px 10px; border-bottom: 1px solid var(--hairline); display: flex; justify-content: space-between; align-items: center; }
+  .modal-header h3 { font-size: 14px; margin: 0; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); font-weight: 600; }
+  .modal-body { padding: 14px 20px; }
+  .modal-footer { padding: 10px 20px; border-top: 1px solid var(--hairline); display: flex; gap: 8px; justify-content: flex-end; background: var(--paper); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
   .form-grid .full { grid-column: 1 / -1; }
+  .form-grid label { margin-bottom: 2px; }
+  .form-grid input, .form-grid select { padding: 6px 10px; font-size: 14px; }
+  .form-grid input[type="color"] { padding: 2px; height: 32px; }
+  .form-grid .rule { margin: 8px 0; }
 
   /* Empty */
   .empty { text-align: center; padding: 48px 20px; color: var(--ink-muted); }
@@ -1027,9 +1032,9 @@ function openBillEditor(id) {
           <label>Category</label>
           <input name="category" type="text" value="${escapeAttr(b.category || '')}" placeholder="Utilities" />
         </div>
-        <div class="full">
+        <div>
           <label>Color</label>
-          <input name="color" type="color" value="${b.color || '#B8860B'}" style="height:40px;padding:4px;" />
+          <input name="color" type="color" value="${b.color || '#B8860B'}" />
         </div>
         <div class="full" id="preview"></div>
       </div>
@@ -1076,11 +1081,11 @@ function openBillEditor(id) {
       };
       const renderPreview = () => {
         const draft = readDraft();
-        const dates = State.paySchedule(6);
+        const dates = State.paySchedule(3);
         const { perPaycheck } = computeAllocations([draft], dates);
         preview.innerHTML = `
           <hr class="rule"/>
-          <div class="label" style="margin-bottom:8px;">Next 6 paychecks (preview)</div>
+          <div class="label" style="margin-bottom:6px;">Next 3 paychecks (preview)</div>
           <table class="schedule" style="min-width:0;">
             <thead><tr><th>Pay date</th><th>Allocate</th><th>Running</th></tr></thead>
             <tbody>
