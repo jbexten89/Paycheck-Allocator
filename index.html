@@ -921,7 +921,7 @@ const State = {
     try { this.billOrder = JSON.parse(localStorage.getItem(STORE.billOrder) || '[]'); }
     catch { this.billOrder = []; }
     const sc = parseInt(localStorage.getItem(STORE.schedCount) || '6', 10);
-    this.schedCount = [6, 12, 26].includes(sc) ? sc : 6;
+    this.schedCount = [6, 12, 18, 26].includes(sc) ? sc : 6;
     this.payAmount = parseFloat(localStorage.getItem(STORE.payAmount) || '0') || 0;
     try { this.collapsedCats = new Set(JSON.parse(localStorage.getItem(STORE.collapsedCats) || '[]')); }
     catch { this.collapsedCats = new Set(); }
@@ -1866,7 +1866,7 @@ route('settings', (root) => {
         <div style="margin-top:14px;">
           <label>Schedule view (pay periods)</label>
           <select id="sched-count">
-            ${[6,12,26].map((n) => `<option value="${n}" ${n===State.schedCount?'selected':''}>${n}</option>`).join('')}
+            ${[6,12,18,26].map((n) => `<option value="${n}" ${n===State.schedCount?'selected':''}>${n}</option>`).join('')}
           </select>
         </div>
         <div style="margin-top:14px;">
