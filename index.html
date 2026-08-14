@@ -1778,6 +1778,7 @@ route('schedule', (root) => {
           <h1>Pay Schedule</h1>
           <div class="sub">Per-bill allocations across upcoming paychecks. Click a row for running balances.</div>
         </div>
+        <button class="btn" id="sched-export">Export CSV</button>
       </div>
 
       ${
@@ -1866,6 +1867,44 @@ route('schedule', (root) => {
       const det = root.querySelector(`tr[data-detail-for="${tr.dataset.i}"]`);
       if (det) det.style.display = det.style.display === 'none' ? 'table-row' : 'none';
     });
+    const exportBtn = $('#sched-export');
+    if (exportBtn) exportBtn.onclick = () => {
+      const csvEscape = (v) => {
+        const s = String(v ?? '');
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const money = (n) => n.toFixed(2);
+      const rows = [];
+      rows.push(['Bill', ...perPaycheck.map((p) => fmtDateShort.format(p.payDate)), 'Total']);
+      const grandPerPay = perPaycheck.map(() => 0);
+      let grand = 0;
+      for (const cat of catNames) {
+        const catBills = State.orderedBillsInCategory(cat).filter((b) => b.amount > 0);
+        const catPerPay = perPaycheck.map(() => 0);
+        let catTotal = 0;
+        rows.push([cat]);
+        for (const b of catBills) {
+          const cells = perPaycheck.map((p) => {
+            const it = p.items.find((x) => x.billId === b.id);
+            return it ? it.amount : 0;
+          });
+          const billSum = cells.reduce((s, v) => s + v, 0);
+          cells.forEach((v, i) => { catPerPay[i] += v; grandPerPay[i] += v; });
+          catTotal += billSum; grand += billSum;
+          rows.push([b.name, ...cells.map(money), money(billSum)]);
+        }
+        rows.push([`  ${cat} subtotal`, ...catPerPay.map(money), money(catTotal)]);
+        rows.push([]);
+      }
+      rows.push(['TOTAL', ...grandPerPay.map(money), money(grand)]);
+      const csv = rows.map((r) => r.map(csvEscape).join(',')).join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `pay-schedule-${toISO(new Date())}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
     attachFab(false);
   };
   render();
