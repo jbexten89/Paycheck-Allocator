@@ -604,7 +604,8 @@ const STORE = {
   skipLastOfThree: 'paycheck_allocator.skip_last_of_three',
   singleSmallMonthly: 'paycheck_allocator.single_small_monthly',
   singleSmallThreshold: 'paycheck_allocator.single_small_threshold',
-  singleSubscription: 'paycheck_allocator.single_subscription'
+  singleSubscription: 'paycheck_allocator.single_subscription',
+  singlePayCats: 'paycheck_allocator.single_pay_cats'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -817,8 +818,8 @@ function computeAllocations(bills, payDates, opts = {}) {
       const isLastVisibleInCycle = (i + 1 >= payDates.length)
         || (toISO(nextDueCycleFor(bill, payDates[i + 1]).D) !== dueKey);
       const cat = (bill.category || '').trim().toLowerCase();
-      // Optional: Subscriptions category → take full amount from one paycheck (last visible in cycle)
-      const singleSub = State.singleSubscription && cat === 'subscriptions' && cycleCount > 1;
+      // Optional: any category flagged as single-pay → full amount from one paycheck (last visible in cycle)
+      const singleSub = State.singlePayCats.has(cat) && cycleCount > 1;
       // Optional: for monthly bills under threshold, take full amount from last pay only
       const singleSmall = State.singleSmallMonthly
         && !isAnchorBased
@@ -1019,6 +1020,10 @@ const State = {
     this.singleSmallMonthly = localStorage.getItem(STORE.singleSmallMonthly) === '1';
     this.singleSmallThreshold = parseFloat(localStorage.getItem(STORE.singleSmallThreshold) || '500') || 500;
     this.singleSubscription = localStorage.getItem(STORE.singleSubscription) === '1';
+    try { this.singlePayCats = new Set((JSON.parse(localStorage.getItem(STORE.singlePayCats) || '[]') || []).map((s) => String(s).toLowerCase())); }
+    catch { this.singlePayCats = new Set(); }
+    // Migrate legacy singleSubscription flag into the set
+    if (this.singleSubscription) this.singlePayCats.add('subscriptions');
     if (!localStorage.getItem(STORE.seeded)) {
       this.bills = defaultMonthlyBills();
       localStorage.setItem(STORE.seeded, '1');
@@ -1045,7 +1050,13 @@ const State = {
   setSkipLastOfThree(v) { this.skipLastOfThree = !!v; localStorage.setItem(STORE.skipLastOfThree, v ? '1' : '0'); },
   setSingleSmallMonthly(v) { this.singleSmallMonthly = !!v; localStorage.setItem(STORE.singleSmallMonthly, v ? '1' : '0'); },
   setSingleSmallThreshold(n) { this.singleSmallThreshold = n; localStorage.setItem(STORE.singleSmallThreshold, String(n)); },
-  setSingleSubscription(v) { this.singleSubscription = !!v; localStorage.setItem(STORE.singleSubscription, v ? '1' : '0'); },
+  setSingleSubscription(v) { this.singleSubscription = !!v; localStorage.setItem(STORE.singleSubscription, v ? '1' : '0'); this.toggleSinglePayCat('Subscriptions', !!v); },
+  toggleSinglePayCat(cat, on) {
+    const key = cat.toLowerCase();
+    if (on) this.singlePayCats.add(key); else this.singlePayCats.delete(key);
+    localStorage.setItem(STORE.singlePayCats, JSON.stringify([...this.singlePayCats]));
+  },
+  isSinglePayCat(cat) { return this.singlePayCats.has((cat || '').toLowerCase()); },
   toggleCatCollapsed(cat) {
     if (this.collapsedCats.has(cat)) this.collapsedCats.delete(cat);
     else this.collapsedCats.add(cat);
@@ -1146,7 +1157,8 @@ const Sync = {
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
       singleSmallThreshold: State.singleSmallThreshold,
-      singleSubscription: State.singleSubscription
+      singleSubscription: State.singleSubscription,
+      singlePayCats: [...State.singlePayCats]
     };
   },
   applyPayload(p) {
@@ -1165,6 +1177,10 @@ const Sync = {
     if (typeof p.singleSmallMonthly === 'boolean') { State.setSingleSmallMonthly(p.singleSmallMonthly); }
     if (typeof p.singleSmallThreshold === 'number') { State.setSingleSmallThreshold(p.singleSmallThreshold); }
     if (typeof p.singleSubscription === 'boolean') { State.setSingleSubscription(p.singleSubscription); }
+    if (Array.isArray(p.singlePayCats)) {
+      State.singlePayCats = new Set(p.singlePayCats.map((s) => String(s).toLowerCase()));
+      localStorage.setItem(STORE.singlePayCats, JSON.stringify([...State.singlePayCats]));
+    }
     localStorage.setItem(STORE.seeded, '1');
   },
 
@@ -2119,9 +2135,14 @@ route('settings', (root) => {
           <input id="single-small-threshold" type="number" min="1" step="1" value="${State.singleSmallThreshold}" style="width:80px;" />
           <label style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">take from last paycheck only</label>
         </div>
-        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
-          <input id="single-sub" type="checkbox" ${State.singleSubscription ? 'checked' : ''} style="width:auto;" />
-          <label for="single-sub" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Subscriptions: take full amount from one paycheck</label>
+        <div style="margin-top:14px;">
+          <label style="text-transform:uppercase; letter-spacing:0.08em; font-size:11px; color:var(--ink-muted); margin-bottom:6px; display:block;">Take full amount from one paycheck for:</label>
+          ${['Subscriptions','Non-Monthly','Fun Stuff','Maint Home','Vehicles'].map((cat) => `
+            <div style="margin-top:6px; display:flex; align-items:center; gap:10px;">
+              <input class="single-pay-cat" type="checkbox" data-cat="${escapeAttr(cat)}" ${State.isSinglePayCat(cat) ? 'checked' : ''} style="width:auto;" id="spc-${cat.replace(/\W+/g,'-')}" />
+              <label for="spc-${cat.replace(/\W+/g,'-')}" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">${escapeHtml(cat)}</label>
+            </div>
+          `).join('')}
         </div>
       </div>
       <div class="card">
@@ -2181,7 +2202,9 @@ route('settings', (root) => {
   $('#skip-third').onchange = (e) => { State.setSkipLastOfThree(e.target.checked); navigate(); };
   $('#single-small').onchange = (e) => { State.setSingleSmallMonthly(e.target.checked); navigate(); };
   $('#single-small-threshold').onchange = (e) => { State.setSingleSmallThreshold(parseFloat(e.target.value) || 500); navigate(); };
-  $('#single-sub').onchange = (e) => { State.setSingleSubscription(e.target.checked); navigate(); };
+  $$('.single-pay-cat').forEach((el) => {
+    el.onchange = () => { State.toggleSinglePayCat(el.dataset.cat, el.checked); navigate(); };
+  });
 
   const signinBtn = $('#sync-signin');
   if (signinBtn) signinBtn.onclick = async () => {
@@ -2436,7 +2459,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','persistCollapsed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','persistCollapsed'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
