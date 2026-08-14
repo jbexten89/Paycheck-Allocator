@@ -689,13 +689,20 @@ function nextDueCycleFor(bill, P) {
  *  - Clamp due day to days-in-month.
  *  - Maintain running balance per bill, seeded with initialSaved, resets when due passes.
  */
+// Calendar-day difference (b - a), ignoring time-of-day so DST doesn't skew.
+function dayDiff(a, b) {
+  const A = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
+  const B = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
+  return Math.round((B - A) / 86400000);
+}
 // Count pay dates falling in [prevDue, D) canonically from a payStart + step-days cadence.
 function canonicalCycleCount(payStart, stepDays, prevDue, D) {
-  const startMs = payStart.getTime();
-  const stepMs = stepDays * 86400000;
-  const nFirst = Math.ceil((prevDue.getTime() - startMs) / stepMs);
-  const nLastExcl = (D.getTime() - startMs) / stepMs;
-  const nLast = Number.isInteger(nLastExcl) ? nLastExcl - 1 : Math.floor(nLastExcl);
+  const dPrev = dayDiff(payStart, prevDue);
+  const dD = dayDiff(payStart, D);
+  const nFirst = Math.ceil(dPrev / stepDays);
+  // largest n such that n*stepDays < dD  (payStart + n*step < D, strictly)
+  const q = dD / stepDays;
+  const nLast = (q === Math.floor(q)) ? q - 1 : Math.floor(q);
   return Math.max(0, nLast - nFirst + 1);
 }
 
