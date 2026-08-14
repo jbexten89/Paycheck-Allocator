@@ -1293,20 +1293,6 @@ route('dashboard', (root) => {
         <div class="hint">over next ${avgWindow.length} pays</div>
       </div>
       <div class="card">
-        <div class="label">${offset === 0 ? 'Next pay date' : (offset < 0 ? 'Previous pay date' : 'Upcoming pay date')}</div>
-        <div class="value neutral" style="font-size:18px;">${next ? fmtDate.format(next.payDate) : '—'}</div>
-        <div class="pay-nav">
-          <button class="pay-arrow" id="pay-back" aria-label="Previous pay period" ${canBack ? '' : 'disabled'}>‹</button>
-          <button class="pay-arrow" id="pay-fwd" aria-label="Next pay period" ${canFwd ? '' : 'disabled'}>›</button>
-          ${offset !== 0 ? `<button class="btn today-chip" id="pay-today">today</button>` : ''}
-        </div>
-        <div class="hint">${
-          State.payAmount > 0
-            ? `${fmtUSD.format(State.payAmount)}${next ? ' · ' + daysUntil(next.payDate) : ''}`
-            : (next ? daysUntil(next.payDate) : '')
-        }</div>
-      </div>
-      <div class="card">
         <div class="label">${offset === 0 ? 'Set aside next pay' : 'Set aside this pay'}</div>
         <div class="value amber">${fmtUSD.format(next ? next.total : 0)}</div>
         ${
@@ -1322,6 +1308,20 @@ route('dashboard', (root) => {
           State.payAmount > 0 && next
             ? `${fmtUSD.format(Math.max(0, State.payAmount - next.total))} leftover`
             : `across ${next ? next.items.length : 0} bill${next && next.items.length === 1 ? '' : 's'}`
+        }</div>
+      </div>
+      <div class="card">
+        <div class="label">${offset === 0 ? 'Next pay date' : (offset < 0 ? 'Previous pay date' : 'Upcoming pay date')}</div>
+        <div class="value neutral" style="font-size:18px;">${next ? fmtDate.format(next.payDate) : '—'}</div>
+        <div class="pay-nav">
+          <button class="pay-arrow" id="pay-back" aria-label="Previous pay period" ${canBack ? '' : 'disabled'}>‹</button>
+          <button class="pay-arrow" id="pay-fwd" aria-label="Next pay period" ${canFwd ? '' : 'disabled'}>›</button>
+          ${offset !== 0 ? `<button class="btn today-chip" id="pay-today">today</button>` : ''}
+        </div>
+        <div class="hint">${
+          State.payAmount > 0
+            ? `${fmtUSD.format(State.payAmount)}${next ? ' · ' + daysUntil(next.payDate) : ''}`
+            : (next ? daysUntil(next.payDate) : '')
         }</div>
       </div>
     </div>
