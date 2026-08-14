@@ -165,13 +165,26 @@
   .summary .value { overflow-wrap: anywhere; }
 
   .summary .card { padding: 14px 18px; }
+  .summary-top, .summary-bot {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--gap);
+  }
+  .summary-top { margin-bottom: var(--gap); }
+  @media (min-width: 1000px) {
+    .summary-top, .summary-bot { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .summary-top { grid-column: 1 / -1; }
+  }
   @media (max-width: 768px) {
-    .summary > .card:nth-child(3),
-    .summary > .card:nth-child(4) {
+    .summary-bot {
       position: sticky;
       top: 0;
       z-index: 30;
+      padding: 8px 0;
+      background: var(--paper);
       box-shadow: 0 6px 12px rgba(0,0,0,0.35);
+      margin: 0 -16px 12px;
+      padding-left: 16px; padding-right: 16px;
     }
   }
   .summary .label { font-size: 12px; color: var(--amber); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -1340,7 +1353,7 @@ route('dashboard', (root) => {
         : ''
     }
 
-    <div class="grid grid-4 summary">
+    <div class="summary summary-top">
       <div class="card">
         <div class="label">Total monthly</div>
         <div class="value">${fmtUSD.format(monthlyTotal)}</div>
@@ -1351,6 +1364,9 @@ route('dashboard', (root) => {
         <div class="value">${fmtUSD.format(avg)}</div>
         <div class="hint">over next ${avgWindow.length} pays</div>
       </div>
+    </div>
+
+    <div class="summary summary-bot">
       <div class="card">
         <div class="label">${offset === 0 ? 'Set aside next pay' : 'Set aside this pay'}</div>
         <div class="value amber">${fmtUSD.format(next ? next.total : 0)}</div>
@@ -1385,7 +1401,7 @@ route('dashboard', (root) => {
       </div>
     </div>
 
-    <div style="margin-top:24px;">
+    <div>
       <div class="card">
         <h2 class="accent">Next paycheck breakdown</h2>
         ${
