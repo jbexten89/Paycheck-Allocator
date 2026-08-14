@@ -1251,8 +1251,10 @@ route('dashboard', (root) => {
   const canFwd = targetIdx < perPaycheck.length - 1;
 
   const monthlyTotal = State.bills.filter((b) => b.amount > 0).reduce((s, b) => s + Number(b.amount), 0);
-  const totalNext26 = perPaycheck.reduce((s, p) => s + p.total, 0);
-  const avg = perPaycheck.length ? totalNext26 / perPaycheck.length : 0;
+  // Average uses the next 26 pay dates from today (one year for biweekly).
+  const avgWindow = perPaycheck.slice(nextIdx, nextIdx + 26);
+  const totalAvgWindow = avgWindow.reduce((s, p) => s + p.total, 0);
+  const avg = avgWindow.length ? totalAvgWindow / avgWindow.length : 0;
 
   root.innerHTML = `
     <div class="view-header">
@@ -1271,7 +1273,7 @@ route('dashboard', (root) => {
       <div class="card">
         <div class="label">Avg per paycheck</div>
         <div class="value">${fmtUSD.format(avg)}</div>
-        <div class="hint">over next ${perPaycheck.length} pays</div>
+        <div class="hint">over next ${avgWindow.length} pays</div>
       </div>
       <div class="card">
         <div class="label">${offset === 0 ? 'Next pay date' : (offset < 0 ? 'Previous pay date' : 'Upcoming pay date')}</div>
