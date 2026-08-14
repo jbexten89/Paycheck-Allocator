@@ -1224,6 +1224,13 @@ const Sync = {
     });
     if (error) throw error;
   },
+  async verifyCode(email, code) {
+    try { await loadSupabaseScript(); } catch (e) { throw new Error('Supabase CDN unreachable: ' + e.message); }
+    if (!ensureSb()) throw new Error('Supabase client failed to initialize');
+    const { data, error } = await sb.auth.verifyOtp({ email, token: code, type: 'email' });
+    if (error) throw error;
+    return data;
+  },
   async signOut() { if (ensureSb()) await sb.auth.signOut(); },
   async pullOrPush() {
     if (!ensureSb() || !this.user) return;
@@ -2164,7 +2171,12 @@ route('settings', (root) => {
                </div>`
             : `<label>Email</label>
                <input id="sync-email" type="email" placeholder="you@example.com" style="margin-bottom:8px;" />
-               <button class="btn btn-primary" id="sync-signin">Send magic link</button>`
+               <button class="btn btn-primary" id="sync-signin">Send code</button>
+               <div style="margin-top:14px;">
+                 <label>Or enter 6-digit code from email</label>
+                 <input id="sync-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456" autocomplete="one-time-code" style="margin-bottom:8px;" />
+                 <button class="btn" id="sync-verify">Verify code</button>
+               </div>`
         }
         <div class="hint" style="margin-top:10px; color:var(--ink-muted); font-size:12px;">
           Status: <span id="sync-status">${Sync.status}${Sync.lastError ? ` (${escapeHtml(Sync.lastError)})` : ''}</span>
@@ -2222,12 +2234,30 @@ route('settings', (root) => {
     signinBtn.textContent = 'Sending…';
     try {
       await Sync.signIn(email);
-      alert('Check ' + email + ' for a magic link. Click it on this device to sign in.');
+      alert('Sent to ' + email + '. Enter the 6-digit code from the email below (works inside PWA on iOS).');
     } catch (e) {
       alert('Sign-in failed: ' + e.message);
     } finally {
       signinBtn.disabled = false;
-      signinBtn.textContent = 'Send magic link';
+      signinBtn.textContent = 'Send code';
+    }
+  };
+  const verifyBtn = $('#sync-verify');
+  if (verifyBtn) verifyBtn.onclick = async () => {
+    const email = ($('#sync-email').value || '').trim();
+    const code = ($('#sync-code').value || '').trim();
+    if (!email) { alert('Enter your email first'); return; }
+    if (!/^\d{6}$/.test(code)) { alert('Enter the 6-digit code from the email'); return; }
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Verifying…';
+    try {
+      await Sync.verifyCode(email, code);
+      // onAuthStateChange will fire and re-render
+    } catch (e) {
+      alert('Verify failed: ' + e.message);
+    } finally {
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = 'Verify code';
     }
   };
   const signoutBtn = $('#sync-signout');
