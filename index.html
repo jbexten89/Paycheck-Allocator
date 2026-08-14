@@ -603,7 +603,8 @@ const STORE = {
   showZeroBills: 'paycheck_allocator.show_zero_bills',
   skipLastOfThree: 'paycheck_allocator.skip_last_of_three',
   singleSmallMonthly: 'paycheck_allocator.single_small_monthly',
-  singleSmallThreshold: 'paycheck_allocator.single_small_threshold'
+  singleSmallThreshold: 'paycheck_allocator.single_small_threshold',
+  singleSubscription: 'paycheck_allocator.single_subscription'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -811,6 +812,13 @@ function computeAllocations(bills, payDates, opts = {}) {
       const baseAmount = cycleIndex === 0
         ? Math.max(0, Number(bill.amount) - Number(bill.initialSaved || 0))
         : Number(bill.amount);
+      // Detect if this iteration is the last visible pay in the current cycle
+      // (works for both array-count and canonical-count cases).
+      const isLastVisibleInCycle = (i + 1 >= payDates.length)
+        || (toISO(nextDueCycleFor(bill, payDates[i + 1]).D) !== dueKey);
+      const cat = (bill.category || '').trim().toLowerCase();
+      // Optional: Subscriptions category → take full amount from one paycheck (last visible in cycle)
+      const singleSub = State.singleSubscription && cat === 'subscriptions' && cycleCount > 1;
       // Optional: for monthly bills under threshold, take full amount from last pay only
       const singleSmall = State.singleSmallMonthly
         && !isAnchorBased
@@ -819,7 +827,9 @@ function computeAllocations(bills, payDates, opts = {}) {
       // Optional: for 3-paycheck cycles, spread over first 2 only (last pay = 0)
       const skip3 = State.skipLastOfThree && cycleCount === 3;
       let perPay;
-      if (singleSmall) {
+      if (singleSub) {
+        perPay = isLastVisibleInCycle ? baseAmount : 0;
+      } else if (singleSmall) {
         perPay = (payIdxInCycle === cycleCount) ? baseAmount : 0;
       } else if (skip3) {
         perPay = (payIdxInCycle === 3) ? 0 : baseAmount / 2;
@@ -1008,6 +1018,7 @@ const State = {
     this.skipLastOfThree = localStorage.getItem(STORE.skipLastOfThree) === '1';
     this.singleSmallMonthly = localStorage.getItem(STORE.singleSmallMonthly) === '1';
     this.singleSmallThreshold = parseFloat(localStorage.getItem(STORE.singleSmallThreshold) || '500') || 500;
+    this.singleSubscription = localStorage.getItem(STORE.singleSubscription) === '1';
     if (!localStorage.getItem(STORE.seeded)) {
       this.bills = defaultMonthlyBills();
       localStorage.setItem(STORE.seeded, '1');
@@ -1034,6 +1045,7 @@ const State = {
   setSkipLastOfThree(v) { this.skipLastOfThree = !!v; localStorage.setItem(STORE.skipLastOfThree, v ? '1' : '0'); },
   setSingleSmallMonthly(v) { this.singleSmallMonthly = !!v; localStorage.setItem(STORE.singleSmallMonthly, v ? '1' : '0'); },
   setSingleSmallThreshold(n) { this.singleSmallThreshold = n; localStorage.setItem(STORE.singleSmallThreshold, String(n)); },
+  setSingleSubscription(v) { this.singleSubscription = !!v; localStorage.setItem(STORE.singleSubscription, v ? '1' : '0'); },
   toggleCatCollapsed(cat) {
     if (this.collapsedCats.has(cat)) this.collapsedCats.delete(cat);
     else this.collapsedCats.add(cat);
@@ -1133,7 +1145,8 @@ const Sync = {
       showZeroBills: State.showZeroBills,
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
-      singleSmallThreshold: State.singleSmallThreshold
+      singleSmallThreshold: State.singleSmallThreshold,
+      singleSubscription: State.singleSubscription
     };
   },
   applyPayload(p) {
@@ -1151,6 +1164,7 @@ const Sync = {
     if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
     if (typeof p.singleSmallMonthly === 'boolean') { State.setSingleSmallMonthly(p.singleSmallMonthly); }
     if (typeof p.singleSmallThreshold === 'number') { State.setSingleSmallThreshold(p.singleSmallThreshold); }
+    if (typeof p.singleSubscription === 'boolean') { State.setSingleSubscription(p.singleSubscription); }
     localStorage.setItem(STORE.seeded, '1');
   },
 
@@ -2105,6 +2119,10 @@ route('settings', (root) => {
           <input id="single-small-threshold" type="number" min="1" step="1" value="${State.singleSmallThreshold}" style="width:80px;" />
           <label style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">take from last paycheck only</label>
         </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="single-sub" type="checkbox" ${State.singleSubscription ? 'checked' : ''} style="width:auto;" />
+          <label for="single-sub" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Subscriptions: take full amount from one paycheck</label>
+        </div>
       </div>
       <div class="card">
         <h2>Sync (cloud backup)</h2>
@@ -2163,6 +2181,7 @@ route('settings', (root) => {
   $('#skip-third').onchange = (e) => { State.setSkipLastOfThree(e.target.checked); navigate(); };
   $('#single-small').onchange = (e) => { State.setSingleSmallMonthly(e.target.checked); navigate(); };
   $('#single-small-threshold').onchange = (e) => { State.setSingleSmallThreshold(parseFloat(e.target.value) || 500); navigate(); };
+  $('#single-sub').onchange = (e) => { State.setSingleSubscription(e.target.checked); navigate(); };
 
   const signinBtn = $('#sync-signin');
   if (signinBtn) signinBtn.onclick = async () => {
@@ -2417,7 +2436,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','persistCollapsed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','persistCollapsed'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
