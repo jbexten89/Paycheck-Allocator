@@ -1215,19 +1215,17 @@ const Sync = {
     });
     window.addEventListener('online', () => { if (this.user) this.push(); });
   },
-  async signIn(email) {
+  async signInPassword(email, password) {
     try { await loadSupabaseScript(); } catch (e) { throw new Error('Supabase CDN unreachable: ' + e.message); }
     if (!ensureSb()) throw new Error('Supabase client failed to initialize');
-    const { error } = await sb.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: location.href.split('#')[0] }
-    });
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
     if (error) throw error;
+    return data;
   },
-  async verifyCode(email, code) {
+  async signUpPassword(email, password) {
     try { await loadSupabaseScript(); } catch (e) { throw new Error('Supabase CDN unreachable: ' + e.message); }
     if (!ensureSb()) throw new Error('Supabase client failed to initialize');
-    const { data, error } = await sb.auth.verifyOtp({ email, token: code, type: 'email' });
+    const { data, error } = await sb.auth.signUp({ email, password });
     if (error) throw error;
     return data;
   },
@@ -2170,12 +2168,12 @@ route('settings', (root) => {
                  <button class="btn btn-danger" id="sync-signout">Sign out</button>
                </div>`
             : `<label>Email</label>
-               <input id="sync-email" type="email" placeholder="you@example.com" style="margin-bottom:8px;" />
-               <button class="btn btn-primary" id="sync-signin">Send code</button>
-               <div style="margin-top:14px;">
-                 <label>Or enter 6-digit code from email</label>
-                 <input id="sync-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456" autocomplete="one-time-code" style="margin-bottom:8px;" />
-                 <button class="btn" id="sync-verify">Verify code</button>
+               <input id="sync-email" type="email" autocomplete="email" placeholder="you@example.com" style="margin-bottom:8px;" />
+               <label>Password</label>
+               <input id="sync-password" type="password" autocomplete="current-password" placeholder="min 6 characters" style="margin-bottom:10px;" />
+               <div class="row" style="gap:8px;">
+                 <button class="btn btn-primary" id="sync-signin">Sign in</button>
+                 <button class="btn" id="sync-signup">Create account</button>
                </div>`
         }
         <div class="hint" style="margin-top:10px; color:var(--ink-muted); font-size:12px;">
@@ -2226,38 +2224,43 @@ route('settings', (root) => {
     el.onchange = () => { State.toggleSinglePayCat(el.dataset.cat, el.checked); navigate(); };
   });
 
+  const getCreds = () => ({
+    email: ($('#sync-email')?.value || '').trim(),
+    password: ($('#sync-password')?.value || '')
+  });
   const signinBtn = $('#sync-signin');
   if (signinBtn) signinBtn.onclick = async () => {
-    const email = ($('#sync-email').value || '').trim();
-    if (!email) { alert('Enter your email'); return; }
+    const { email, password } = getCreds();
+    if (!email || !password) { alert('Enter your email and password'); return; }
     signinBtn.disabled = true;
-    signinBtn.textContent = 'Sending…';
+    signinBtn.textContent = 'Signing in…';
     try {
-      await Sync.signIn(email);
-      alert('Sent to ' + email + '. Enter the 6-digit code from the email below (works inside PWA on iOS).');
+      await Sync.signInPassword(email, password);
+      // onAuthStateChange will re-render
     } catch (e) {
       alert('Sign-in failed: ' + e.message);
     } finally {
       signinBtn.disabled = false;
-      signinBtn.textContent = 'Send code';
+      signinBtn.textContent = 'Sign in';
     }
   };
-  const verifyBtn = $('#sync-verify');
-  if (verifyBtn) verifyBtn.onclick = async () => {
-    const email = ($('#sync-email').value || '').trim();
-    const code = ($('#sync-code').value || '').trim();
-    if (!email) { alert('Enter your email first'); return; }
-    if (!/^\d{6}$/.test(code)) { alert('Enter the 6-digit code from the email'); return; }
-    verifyBtn.disabled = true;
-    verifyBtn.textContent = 'Verifying…';
+  const signupBtn = $('#sync-signup');
+  if (signupBtn) signupBtn.onclick = async () => {
+    const { email, password } = getCreds();
+    if (!email || password.length < 6) { alert('Enter your email and a password of at least 6 characters'); return; }
+    signupBtn.disabled = true;
+    signupBtn.textContent = 'Creating…';
     try {
-      await Sync.verifyCode(email, code);
-      // onAuthStateChange will fire and re-render
+      const { session } = await Sync.signUpPassword(email, password);
+      if (!session) {
+        alert('Account created. If email confirmation is enabled in Supabase, check ' + email + ' and click the link, then Sign in here.');
+      }
+      // If session was created (email confirmation off), onAuthStateChange re-renders.
     } catch (e) {
-      alert('Verify failed: ' + e.message);
+      alert('Sign-up failed: ' + e.message);
     } finally {
-      verifyBtn.disabled = false;
-      verifyBtn.textContent = 'Verify code';
+      signupBtn.disabled = false;
+      signupBtn.textContent = 'Create account';
     }
   };
   const signoutBtn = $('#sync-signout');
