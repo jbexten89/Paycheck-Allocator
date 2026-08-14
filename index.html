@@ -184,6 +184,7 @@
     transition: width 240ms ease;
   }
   .setaside-bar-fill.over { background: var(--danger); }
+  .leftover-amount { font-size: 16px; font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; }
   .pay-nav { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: nowrap; }
   .pay-arrow {
     background: transparent; border: 1px solid var(--hairline);
@@ -1306,7 +1307,7 @@ route('dashboard', (root) => {
         }
         <div class="hint">${
           State.payAmount > 0 && next
-            ? `${fmtUSD.format(Math.max(0, State.payAmount - next.total))} leftover`
+            ? `<span class="leftover-amount">${fmtUSD.format(Math.max(0, State.payAmount - next.total))}</span> leftover`
             : `across ${next ? next.items.length : 0} bill${next && next.items.length === 1 ? '' : 's'}`
         }</div>
       </div>
