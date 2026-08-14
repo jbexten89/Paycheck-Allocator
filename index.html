@@ -233,6 +233,8 @@
   body.drag-lock { touch-action: none !important; overflow: hidden !important; }
   body.drag-lock * { touch-action: none !important; }
   .bill-row.reorder-source { opacity: 0.3; }
+  .bill-row.bill-archived .bill-name,
+  .bill-row.bill-archived .bill-amount { opacity: 0.5; text-decoration: line-through; }
   .bill-row.drag-over-top { box-shadow: inset 0 2px 0 var(--amber); }
   .bill-row.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--amber); }
   .reorder-ghost { border-radius: var(--radius-lg); overflow: hidden; }
@@ -359,6 +361,7 @@
   table.schedule tr.expandable:hover { background: var(--paper); }
   table.schedule tr.expanded-detail td { background: var(--paper); font-size: 11px; color: var(--ink-soft); }
   td.total { font-weight: 700; color: var(--good); }
+  td.total.over-pay { color: var(--danger); background: rgba(248,113,113,0.12) !important; }
   tr.row-muted td { color: var(--ink-muted); opacity: 0.55; }
   tr.row-muted td.total { color: var(--ink-muted); font-weight: 500; }
   .sched-dot { display: inline-block; width: 6px; height: 6px; margin-right: 8px; vertical-align: middle; }
@@ -731,7 +734,7 @@ function computeAllocations(bills, payDates, opts = {}) {
   if (!payDates.length) return { perPaycheck, byBill };
 
   for (const bill of bills) {
-    if (!bill || !(bill.amount > 0)) continue;
+    if (!bill || !(bill.amount > 0) || bill.archived) continue;
     byBill[bill.id] = [];
     let runningBalance = Number(bill.initialSaved || 0);
     let cycleIndex = 0;          // 0 = first cycle (uses initialSaved), 1+ subsequent
@@ -1323,6 +1326,35 @@ route('dashboard', (root) => {
       </div>
     </div>
 
+    ${
+      avgWindow.length > 1
+        ? (() => {
+            const maxVal = Math.max(...avgWindow.map((p) => p.total), State.payAmount || 0, 1);
+            const w = 100 / avgWindow.length;
+            const bars = avgWindow.map((p, i) => {
+              const h = (p.total / maxVal) * 100;
+              const over = State.payAmount > 0 && p.total > State.payAmount;
+              return `<rect x="${(i*w).toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${(w*0.72).toFixed(3)}%" height="${h.toFixed(3)}%" fill="${over ? 'var(--danger)' : 'var(--amber)'}" rx="1"><title>${fmtDateShort.format(p.payDate)}: ${fmtUSD.format(p.total)}</title></rect>`;
+            }).join('');
+            const payLine = State.payAmount > 0 && State.payAmount <= maxVal
+              ? `<line x1="0" x2="100%" y1="${((1 - State.payAmount / maxVal) * 100).toFixed(3)}%" y2="${((1 - State.payAmount / maxVal) * 100).toFixed(3)}%" stroke="var(--ink-muted)" stroke-dasharray="2,3" stroke-width="1" opacity="0.7"/>`
+              : '';
+            return `<div style="margin-top:16px;">
+              <div class="card">
+                <h2 class="accent">Cash-flow forecast · next ${avgWindow.length} pays</h2>
+                <div style="position:relative; height:120px; margin-top:8px;">
+                  <svg width="100%" height="100%" preserveAspectRatio="none" style="display:block;">${bars}${payLine}</svg>
+                </div>
+                <div class="hint" style="margin-top:6px;">
+                  ${State.payAmount > 0 ? `Dashed line = ${fmtUSD.format(State.payAmount)} paycheck. ` : ''}
+                  ${avgWindow.filter((p) => State.payAmount > 0 && p.total > State.payAmount).length} pays exceed paycheck.
+                </div>
+              </div>
+            </div>`;
+          })()
+        : ''
+    }
+
     <div style="margin-top:24px;">
       <div class="card">
         <h2 class="accent">Next paycheck breakdown</h2>
@@ -1414,20 +1446,26 @@ route('bills', (root) => {
         <h1>Bills</h1>
         <div class="sub">Your recurring monthly obligations.</div>
       </div>
-      <button class="btn btn-primary" id="add-bill">+ Add bill</button>
+      <div class="row" style="gap:8px;">
+        <button class="btn" id="toggle-archived">${sessionStorage.getItem('bills.showArch') === '1' ? 'Hide archived' : 'Show archived'}</button>
+        <button class="btn btn-primary" id="add-bill">+ Add bill</button>
+      </div>
     </div>
     ${
       State.bills.length === 0
       ? `<div class="card empty">${emptySvg()}<h3>No bills yet</h3><p>Tap “Add bill” to get started.</p></div>`
       : (() => {
+          const showArch = sessionStorage.getItem('bills.showArch') === '1';
+          const visibleBills = State.bills.filter((b) => showArch || !b.archived);
           const groups = {};
-          for (const b of State.bills) {
+          for (const b of visibleBills) {
             const k = (b.category && b.category.trim()) || 'Uncategorized';
             (groups[k] ||= []).push(b);
           }
-          const groupNames = State.orderedCategories();
+          const groupNames = State.orderedCategories().filter((c) => groups[c]);
           return groupNames.map((cat) => {
-            const bills = State.orderedBillsInCategory(cat);
+            const bills = State.orderedBillsInCategory(cat).filter((b) => showArch || !b.archived);
+            if (!bills.length) return '';
             const catTotal = bills.reduce((s, b) => s + (Number(b.amount) || 0), 0);
             const collapsed = State.isCatCollapsed(cat);
             return `
@@ -1441,7 +1479,7 @@ route('bills', (root) => {
                 </div>
                 <div class="bill-list" role="list">
                   ${bills.map((b) => `
-                    <div class="bill-row" role="listitem" data-id="${b.id}" tabindex="0">
+                    <div class="bill-row${b.archived ? ' bill-archived' : ''}" role="listitem" data-id="${b.id}" tabindex="0">
                       <div>
                         <span class="bill-name">${escapeHtml(b.name)}</span>
                         <span class="bill-meta">${
@@ -1450,7 +1488,7 @@ route('bills', (root) => {
                           : b.recurrence === 'everyNMonths'
                             ? `Every ${b.intervalMonths || 1}mo from ${b.dueAnchor ? fmtDateShort.format(parseISO(b.dueAnchor)) : '—'}`
                             : `Due ${b.dueDay}`
-                        }${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}</span>
+                        }${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}${b.archived ? `<span class="badge">archived</span>` : ''}</span>
                       </div>
                       <div class="bill-amount">${fmtUSD.format(b.amount)}</div>
                     </div>
@@ -1463,6 +1501,12 @@ route('bills', (root) => {
     }
   `;
   $('#add-bill').onclick = () => openBillEditor(null);
+  const toggleArchBtn = $('#toggle-archived');
+  if (toggleArchBtn) toggleArchBtn.onclick = () => {
+    const now = sessionStorage.getItem('bills.showArch') === '1';
+    sessionStorage.setItem('bills.showArch', now ? '0' : '1');
+    navigate();
+  };
   $$('.bill-row').forEach((row) => {
     row.addEventListener('click', (e) => {
       if (e.target.closest('[data-del]')) return;
@@ -1714,7 +1758,8 @@ function openBillEditor(id) {
       </div>
     </form>
     <div class="modal-footer">
-      ${isNew ? '' : '<button class="btn btn-danger" data-x="del">Delete</button>'}
+      ${isNew ? '' : `<button class="btn btn-danger" data-x="del">Delete</button>
+                      <button class="btn" data-x="archive">${b.archived ? 'Unarchive' : 'Archive'}</button>`}
       <span class="spacer"></span>
       <button class="btn" data-x="close">Cancel</button>
       <button class="btn btn-primary" data-x="save">Save</button>
@@ -1793,6 +1838,15 @@ function openBillEditor(id) {
           close();
           navigate();
         });
+      };
+      const archBtn = el.querySelector('[data-x="archive"]');
+      if (archBtn) archBtn.onclick = () => {
+        const existing = State.bills.find((x) => x.id === b.id);
+        if (!existing) return;
+        existing.archived = !existing.archived;
+        State.saveBills();
+        close();
+        navigate();
       };
     }
   });
@@ -1897,7 +1951,10 @@ route('schedule', (root) => {
                 }).join('')}
                 <tr class="sched-grand-total">
                   <td>Total</td>
-                  ${perPaycheck.map((p) => `<td class="total">${fmtUSD.format(p.total)}</td>`).join('')}
+                  ${perPaycheck.map((p) => {
+                    const over = State.payAmount > 0 && p.total > State.payAmount;
+                    return `<td class="total${over ? ' over-pay' : ''}"${over ? ` title="Exceeds $${State.payAmount.toFixed(2)} paycheck"` : ''}>${fmtUSD.format(p.total)}</td>`;
+                  }).join('')}
                   <td class="total">${fmtUSD.format(perPaycheck.reduce((s,p)=>s+p.total,0))}</td>
                 </tr>
               </tbody>
