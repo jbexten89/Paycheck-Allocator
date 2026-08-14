@@ -313,7 +313,8 @@
   .bill-row:hover .delete-btn { opacity: 1; }
 
   /* Schedule table */
-  .schedule-wrap { overflow-x: auto; border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--paper-2); }
+  .schedule-wrap { overflow: auto; max-height: calc(100dvh - 240px); border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--paper-2); overscroll-behavior: contain; }
+  @media (max-width: 768px) { .schedule-wrap { max-height: calc(100dvh - 200px); } }
   table.schedule { border-collapse: separate; border-spacing: 0; width: 100%; }
   .schedule-wrap table.schedule { width: auto; min-width: 100%; }
   .schedule-wrap table.schedule th:not(:first-child):not(:last-child),
