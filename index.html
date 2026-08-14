@@ -165,6 +165,15 @@
   .summary .value { overflow-wrap: anywhere; }
 
   .summary .card { padding: 14px 18px; }
+  @media (max-width: 768px) {
+    .summary > .card:nth-child(3),
+    .summary > .card:nth-child(4) {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      box-shadow: 0 6px 12px rgba(0,0,0,0.35);
+    }
+  }
   .summary .label { font-size: 12px; color: var(--amber); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
   .summary .value { font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 700; color: var(--good); margin-top: 4px; letter-spacing: -0.01em; line-height: 1.2; }
   .summary .value.neutral { color: var(--ink); }
