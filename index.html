@@ -1312,7 +1312,7 @@ route('dashboard', (root) => {
         }</div>
       </div>
       <div class="card">
-        <div class="label">${offset === 0 ? 'Next pay date' : (offset < 0 ? 'Previous pay date' : 'Upcoming pay date')}</div>
+        <div class="label">${offset === 0 ? 'Next pay date' : (offset < 0 ? 'Previous pay date' : 'Future pay date')}</div>
         <div class="value neutral" style="font-size:18px;">${next ? fmtDate.format(next.payDate) : '—'}</div>
         <div class="pay-nav">
           <button class="pay-arrow" id="pay-back" aria-label="Previous pay period" ${canBack ? '' : 'disabled'}>‹</button>
