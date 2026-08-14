@@ -170,6 +170,20 @@
   .summary .value.neutral { color: var(--ink); }
   .summary .value.amber { color: var(--amber); }
   .summary .hint { font-size: 11px; color: var(--ink-muted); margin-top: 10px; line-height: 1.25; }
+  .setaside-bar {
+    margin-top: 8px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    overflow: hidden;
+  }
+  .setaside-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--amber-soft), var(--amber));
+    border-radius: 999px;
+    transition: width 240ms ease;
+  }
+  .setaside-bar-fill.over { background: var(--danger); }
   .pay-nav { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: nowrap; }
   .pay-arrow {
     background: transparent; border: 1px solid var(--hairline);
@@ -1292,6 +1306,15 @@ route('dashboard', (root) => {
       <div class="card">
         <div class="label">${offset === 0 ? 'Set aside next pay' : 'Set aside this pay'}</div>
         <div class="value amber">${fmtUSD.format(next ? next.total : 0)}</div>
+        ${
+          State.payAmount > 0 && next
+            ? (() => {
+                const pct = Math.max(0, Math.min(1, next.total / State.payAmount));
+                const over = next.total > State.payAmount;
+                return `<div class="setaside-bar" aria-label="${Math.round(pct*100)}% of paycheck"><div class="setaside-bar-fill${over ? ' over' : ''}" style="width:${(pct*100).toFixed(1)}%"></div></div>`;
+              })()
+            : ''
+        }
         <div class="hint">${
           State.payAmount > 0 && next
             ? `${fmtUSD.format(Math.max(0, State.payAmount - next.total))} leftover`
