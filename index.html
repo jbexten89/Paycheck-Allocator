@@ -215,6 +215,16 @@
   .setaside-bar-fill.over { background: var(--danger); }
   .leftover-amount { font-size: 16px; font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; }
   .pay-nav { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: nowrap; }
+  .next-pay-card { position: relative; }
+  .next-pay-card .pay-after {
+    position: absolute;
+    right: 12px;
+    bottom: 10px;
+    font-size: 10px;
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
   .pay-arrow {
     background: transparent; border: 1px solid var(--hairline);
     color: var(--ink); width: 36px; height: 36px;
@@ -1427,7 +1437,7 @@ route('dashboard', (root) => {
             : `across ${next ? next.items.length : 0} bill${next && next.items.length === 1 ? '' : 's'}`
         }</div>
       </div>
-      <div class="card">
+      <div class="card next-pay-card">
         <div class="label">${offset === 0 ? 'Next pay date' : (offset < 0 ? 'Previous pay date' : 'Future pay date')}</div>
         <div class="value neutral" style="font-size:18px;">${next ? fmtDate.format(next.payDate) : '—'}</div>
         <div class="pay-nav">
@@ -1440,6 +1450,11 @@ route('dashboard', (root) => {
             ? `${fmtUSD.format(State.payAmount)}${next ? ' · ' + daysUntil(next.payDate) : ''}`
             : (next ? daysUntil(next.payDate) : '')
         }</div>
+        ${
+          perPaycheck[targetIdx + 1]
+            ? `<div class="pay-after">then ${fmtDateShort.format(perPaycheck[targetIdx + 1].payDate)}</div>`
+            : ''
+        }
       </div>
     </div>
 
