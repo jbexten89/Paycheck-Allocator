@@ -1455,7 +1455,7 @@ route('dashboard', (root) => {
         <div class="label">${offset === 0 ? 'Next pay date' : (offset < 0 ? 'Previous pay date' : 'Future pay date')}</div>
         <div class="value neutral" style="font-size:18px;">${next ? fmtDate.format(next.payDate) : '—'}</div>
         <div class="pay-nav">
-          ${offset !== 0 ? `<button class="btn today-chip" id="pay-today">today</button>` : ''}
+          <button class="btn today-chip" id="pay-today" style="${offset === 0 ? 'visibility:hidden;' : ''}" aria-hidden="${offset === 0}" ${offset === 0 ? 'tabindex="-1"' : ''}>today</button>
           <button class="pay-arrow" id="pay-back" aria-label="Previous pay period" ${canBack ? '' : 'disabled'}>‹</button>
           <button class="pay-arrow" id="pay-fwd" aria-label="Next pay period" ${canFwd ? '' : 'disabled'}>›</button>
         </div>
