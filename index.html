@@ -1131,7 +1131,7 @@ const State = {
     }
     const ordered = (this.catOrder || []).filter((c) => present.has(c));
     // Preferred default order for known categories (case-insensitive).
-    const preferred = ['Monthly', 'Flexible', 'Non-Monthly', 'Fun Stuff', 'Subscriptions', 'Vehicles', 'Maint Home', '3D Printing'];
+    const preferred = ['Monthly', 'Flexible', 'Non-Monthly', 'Fun Stuff', '3D Printing', 'Subscriptions', 'Maint Home', 'Vehicles'];
     const prefIdx = new Map(preferred.map((p, i) => [p.toLowerCase(), i]));
     const rest = [...present].filter((c) => !ordered.includes(c))
       .sort((a, b) => {
