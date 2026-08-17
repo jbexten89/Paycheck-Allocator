@@ -2257,11 +2257,11 @@ route('settings', (root) => {
   $('#pay-amount').onchange = (e) => { State.setPayAmount(parseFloat(e.target.value) || 0); };
   $('#theme').onchange = (e) => { State.setTheme(e.target.value); };
   $('#show-zero').onchange = (e) => { State.setShowZeroBills(e.target.checked); };
-  $('#skip-third').onchange = (e) => { State.setSkipLastOfThree(e.target.checked); navigate(); };
-  $('#single-small').onchange = (e) => { State.setSingleSmallMonthly(e.target.checked); navigate(); };
-  $('#single-small-threshold').onchange = (e) => { State.setSingleSmallThreshold(parseFloat(e.target.value) || 500); navigate(); };
+  $('#skip-third').onchange = (e) => { State.setSkipLastOfThree(e.target.checked); };
+  $('#single-small').onchange = (e) => { State.setSingleSmallMonthly(e.target.checked); };
+  $('#single-small-threshold').onchange = (e) => { State.setSingleSmallThreshold(parseFloat(e.target.value) || 500); };
   $$('.single-pay-cat').forEach((el) => {
-    el.onchange = () => { State.toggleSinglePayCat(el.dataset.cat, el.checked); navigate(); };
+    el.onchange = () => { State.toggleSinglePayCat(el.dataset.cat, el.checked); };
   });
 
   const getCreds = () => ({
