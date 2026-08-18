@@ -204,6 +204,17 @@
       box-shadow: 0 6px 12px rgba(0,0,0,0.35);
       margin: 0 -16px 12px;
     }
+    /* Opaque strip covering the safe-area region at the very top of the viewport
+       so scrolling content doesn't show through into the notch/status-bar area. */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: env(safe-area-inset-top, 0px);
+      background: var(--paper);
+      z-index: 40;
+      pointer-events: none;
+    }
   }
   .summary .label { font-size: 12px; color: var(--amber); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
   .summary .value { font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 700; color: var(--good); margin-top: 4px; letter-spacing: -0.01em; line-height: 1.2; }
