@@ -190,14 +190,15 @@
     gap: var(--gap);
   }
   .summary-top { margin-bottom: var(--gap); }
-  /* Desktop: put both 2-col groups side-by-side so all 4 cards render in one row. */
+  /* On mobile the wrapper is invisible to layout so summary-bot's sticky
+     containing block extends through the breakdown card below. */
+  .summary-row { display: contents; }
+  /* On desktop the wrapper becomes a flex row so both 2-col groups sit
+     side-by-side (4 cards in one row). Sticky is unnecessary here. */
   @media (min-width: 900px) {
-    .summary-top, .summary-bot {
-      display: inline-grid;
-      width: calc(50% - var(--gap) / 2);
-      vertical-align: top;
-    }
-    .summary-top { margin-right: var(--gap); margin-bottom: 0; }
+    .summary-row { display: flex; gap: var(--gap); margin-bottom: var(--gap); }
+    .summary-top, .summary-bot { flex: 1; margin: 0 !important; }
+    .summary-bot { position: static !important; box-shadow: none !important; padding: 0 !important; background: transparent !important; }
   }
   @media (max-width: 768px) {
     .summary-bot {
@@ -1446,6 +1447,7 @@ route('dashboard', (root) => {
         : ''
     }
 
+    <div class="summary-row">
     <div class="summary summary-top">
       <div class="card">
         <div class="label">Total monthly</div>
@@ -1493,6 +1495,7 @@ route('dashboard', (root) => {
             : ''
         }
       </div>
+    </div>
     </div>
 
     <div>
