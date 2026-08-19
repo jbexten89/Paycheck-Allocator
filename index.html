@@ -194,9 +194,19 @@
      containing block extends through the breakdown card below. */
   .summary-row { display: contents; }
   /* On desktop the wrapper becomes a flex row so both 2-col groups sit
-     side-by-side (4 cards in one row). Sticky is unnecessary here. */
+     side-by-side (4 cards in one row) and sticks to the top when scrolling. */
   @media (min-width: 900px) {
-    .summary-row { display: flex; gap: var(--gap); margin-bottom: var(--gap); }
+    .summary-row {
+      display: flex;
+      gap: var(--gap);
+      margin: 0 -8px var(--gap);
+      padding: 8px;
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: var(--paper);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.35);
+    }
     .summary-top, .summary-bot { flex: 1; margin: 0 !important; }
     .summary-bot { position: static !important; box-shadow: none !important; padding: 0 !important; background: transparent !important; }
   }
