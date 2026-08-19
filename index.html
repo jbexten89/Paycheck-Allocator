@@ -1508,6 +1508,36 @@ route('dashboard', (root) => {
     </div>
     </div>
 
+    ${
+      State.payAmount > 0
+        ? (() => {
+            const byMonth = new Map();
+            const startIdx = perPaycheck.findIndex((p) => p.payDate >= (new Date(new Date().setHours(0,0,0,0))));
+            const from = startIdx === -1 ? 0 : startIdx;
+            const window = perPaycheck.slice(from, from + 26);
+            for (const p of window) {
+              const key = p.payDate.getFullYear() + '-' + String(p.payDate.getMonth() + 1).padStart(2, '0');
+              const label = p.payDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+              const cur = byMonth.get(key) || { label, leftover: 0, pays: 0 };
+              cur.leftover += Math.max(0, State.payAmount - p.total);
+              cur.pays += 1;
+              byMonth.set(key, cur);
+            }
+            const rows = [...byMonth.values()].slice(0, 6);
+            if (!rows.length) return '';
+            return `<div style="margin-bottom:16px;"><div class="card">
+              <h2 class="accent">Monthly leftover · next 6 months</h2>
+              <table class="schedule" style="min-width:0;">
+                <thead><tr><th>Month</th><th>Pays</th><th>Leftover</th></tr></thead>
+                <tbody>
+                  ${rows.map((r) => `<tr><td>${r.label}</td><td>${r.pays}</td><td class="total">${fmtUSD.format(r.leftover)}</td></tr>`).join('')}
+                </tbody>
+              </table>
+            </div></div>`;
+          })()
+        : ''
+    }
+
     <div>
       <div class="card">
         <h2 class="accent">Next paycheck breakdown</h2>
