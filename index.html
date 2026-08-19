@@ -190,9 +190,14 @@
     gap: var(--gap);
   }
   .summary-top { margin-bottom: var(--gap); }
-  @media (min-width: 1000px) {
-    .summary-top, .summary-bot { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .summary-top { grid-column: 1 / -1; }
+  /* Desktop: put both 2-col groups side-by-side so all 4 cards render in one row. */
+  @media (min-width: 900px) {
+    .summary-top, .summary-bot {
+      display: inline-grid;
+      width: calc(50% - var(--gap) / 2);
+      vertical-align: top;
+    }
+    .summary-top { margin-right: var(--gap); margin-bottom: 0; }
   }
   @media (max-width: 768px) {
     .summary-bot {
