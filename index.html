@@ -809,33 +809,41 @@ function canonicalCycleCount(payStart, stepDays, prevDue, D) {
   return Math.max(0, nLast - nFirst + 1);
 }
 
-// Move all subscription allocations to the first paycheck of their calendar month.
+// Replace per-cycle subscription allocations with one lump sum on the first
+// paycheck of each month, equal to each subscription's monthly-equivalent rate.
 function batchSubscriptionsMonthly(perPaycheck, bills) {
   if (!perPaycheck.length) return perPaycheck;
-  const isSub = (billId) => {
-    const b = bills.find((x) => x.id === billId);
-    return b && (b.category || '').trim().toLowerCase() === 'subscriptions';
+  const subs = bills.filter((b) => (b.category || '').trim().toLowerCase() === 'subscriptions' && b.amount > 0 && !b.archived);
+  if (!subs.length) return perPaycheck;
+  const monthlyRate = (b) => {
+    if (b.recurrence === 'everyNMonths') return Number(b.amount) / Math.max(1, Number(b.intervalMonths) || 1);
+    if (b.recurrence === 'everyNWeeks')  return Number(b.amount) * (52 / (Math.max(1, Number(b.intervalWeeks) || 1) * 12));
+    return Number(b.amount); // monthly / day-of-month
   };
+  const subIds = new Set(subs.map((b) => b.id));
+  // Strip every existing subscription item
+  for (const p of perPaycheck) {
+    let removed = 0;
+    p.items = p.items.filter((it) => {
+      if (subIds.has(it.billId)) { removed += it.amount; return false; }
+      return true;
+    });
+    p.total -= removed;
+  }
+  // Deposit monthly-rate items on the first pay of each calendar month
   const firstByMonth = new Map();
   perPaycheck.forEach((p, i) => {
     const k = p.payDate.getFullYear() + '-' + p.payDate.getMonth();
     if (!firstByMonth.has(k)) firstByMonth.set(k, i);
   });
-  for (let i = 0; i < perPaycheck.length; i++) {
-    const p = perPaycheck[i];
-    const k = p.payDate.getFullYear() + '-' + p.payDate.getMonth();
-    const firstIdx = firstByMonth.get(k);
-    if (i === firstIdx) continue;
-    const subItems = p.items.filter((it) => isSub(it.billId));
-    if (!subItems.length) continue;
-    for (const it of subItems) {
-      p.total -= it.amount;
-      perPaycheck[firstIdx].total += it.amount;
-      const dest = perPaycheck[firstIdx].items.find((x) => x.billId === it.billId);
-      if (dest) dest.amount += it.amount;
-      else perPaycheck[firstIdx].items.push({ ...it });
+  for (const idx of firstByMonth.values()) {
+    const p = perPaycheck[idx];
+    for (const b of subs) {
+      const amt = monthlyRate(b);
+      if (amt <= 0) continue;
+      p.items.push({ billId: b.id, name: b.name, color: b.color, amount: amt, dueDate: p.payDate, paychecksInCycle: 1 });
+      p.total += amt;
     }
-    p.items = p.items.filter((it) => !isSub(it.billId));
   }
   return perPaycheck;
 }
