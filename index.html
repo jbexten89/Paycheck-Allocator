@@ -1623,7 +1623,7 @@ route('dashboard', (root) => {
                     <tr class="sched-cat-header">
                       <td colspan="4">
                         <span class="cat-name">${escapeHtml(cat)}</span>
-                        <span class="cat-meta">${activeCount}${State.showZeroBills && activeCount !== items.length ? '/' + items.length : ''} bill${items.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
+                        <span class="cat-meta" style="color: var(--danger);">${activeCount}${State.showZeroBills && activeCount !== items.length ? '/' + items.length : ''} bill${items.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
                       </td>
                     </tr>
                   `;
