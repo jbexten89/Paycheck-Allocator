@@ -252,6 +252,15 @@
   }
   .setaside-bar-fill.over { background: var(--danger); }
   .leftover-amount { font-size: 16px; font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; }
+  .cell-credit-input {
+    display: inline-block !important;
+    width: 70px !important;
+    padding: 2px 6px !important;
+    font-size: 11px !important;
+    height: 22px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
   .pay-nav { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: nowrap; }
   .next-pay-card { position: relative; padding-bottom: 28px; }
   .next-pay-card .pay-after {
@@ -661,7 +670,9 @@ const STORE = {
   singleSmallThreshold: 'paycheck_allocator.single_small_threshold',
   singleSubscription: 'paycheck_allocator.single_subscription',
   singlePayCats: 'paycheck_allocator.single_pay_cats',
-  subsMonthlyBatch: 'paycheck_allocator.subs_monthly_batch'
+  subsMonthlyBatch: 'paycheck_allocator.subs_monthly_batch',
+  cellCreditEnabled: 'paycheck_allocator.cell_credit_enabled',
+  cellCredits: 'paycheck_allocator.cell_credits'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -904,10 +915,16 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
       if (cycleCount === 0) continue;
 
-      // per-paycheck amount
+      // per-paycheck amount (with optional per-month credit for Cell bills)
+      const cycleKey = D.getFullYear() + '-' + String(D.getMonth() + 1).padStart(2, '0');
+      let cellCredit = 0;
+      if (typeof State !== 'undefined' && State.cellCreditEnabled && (bill.name || '').trim().toLowerCase() === 'cell') {
+        cellCredit = Math.max(0, Number((State.cellCredits || {})[cycleKey] || 0));
+      }
+      const effectiveAmount = Math.max(0, Number(bill.amount) - cellCredit);
       const baseAmount = cycleIndex === 0
-        ? Math.max(0, Number(bill.amount) - Number(bill.initialSaved || 0))
-        : Number(bill.amount);
+        ? Math.max(0, effectiveAmount - Number(bill.initialSaved || 0))
+        : effectiveAmount;
       // Detect if this iteration is the last visible pay in the current cycle
       // (works for both array-count and canonical-count cases).
       const isLastVisibleInCycle = (i + 1 >= payDates.length)
@@ -1123,6 +1140,9 @@ const State = {
     // Migrate legacy singleSubscription flag into the set
     if (this.singleSubscription) this.singlePayCats.add('subscriptions');
     this.subsMonthlyBatch = localStorage.getItem(STORE.subsMonthlyBatch) === '1';
+    this.cellCreditEnabled = localStorage.getItem(STORE.cellCreditEnabled) === '1';
+    try { this.cellCredits = JSON.parse(localStorage.getItem(STORE.cellCredits) || '{}') || {}; }
+    catch { this.cellCredits = {}; }
     if (!localStorage.getItem(STORE.seeded)) {
       this.bills = defaultMonthlyBills();
       localStorage.setItem(STORE.seeded, '1');
@@ -1151,6 +1171,13 @@ const State = {
   setSingleSmallThreshold(n) { this.singleSmallThreshold = n; localStorage.setItem(STORE.singleSmallThreshold, String(n)); },
   setSingleSubscription(v) { this.singleSubscription = !!v; localStorage.setItem(STORE.singleSubscription, v ? '1' : '0'); this.toggleSinglePayCat('Subscriptions', !!v); },
   setSubsMonthlyBatch(v) { this.subsMonthlyBatch = !!v; localStorage.setItem(STORE.subsMonthlyBatch, v ? '1' : '0'); },
+  setCellCreditEnabled(v) { this.cellCreditEnabled = !!v; localStorage.setItem(STORE.cellCreditEnabled, v ? '1' : '0'); },
+  setCellCredit(monthKey, amount) {
+    const v = Number(amount) || 0;
+    if (v > 0) this.cellCredits[monthKey] = v;
+    else delete this.cellCredits[monthKey];
+    localStorage.setItem(STORE.cellCredits, JSON.stringify(this.cellCredits));
+  },
   toggleSinglePayCat(cat, on) {
     const key = cat.toLowerCase();
     if (on) this.singlePayCats.add(key); else this.singlePayCats.delete(key);
@@ -1273,7 +1300,9 @@ const Sync = {
       singleSmallThreshold: State.singleSmallThreshold,
       singleSubscription: State.singleSubscription,
       singlePayCats: [...State.singlePayCats],
-      subsMonthlyBatch: State.subsMonthlyBatch
+      subsMonthlyBatch: State.subsMonthlyBatch,
+      cellCreditEnabled: State.cellCreditEnabled,
+      cellCredits: State.cellCredits
     };
   },
   applyPayload(p) {
@@ -1297,6 +1326,11 @@ const Sync = {
       localStorage.setItem(STORE.singlePayCats, JSON.stringify([...State.singlePayCats]));
     }
     if (typeof p.subsMonthlyBatch === 'boolean') { State.setSubsMonthlyBatch(p.subsMonthlyBatch); }
+    if (typeof p.cellCreditEnabled === 'boolean') { State.setCellCreditEnabled(p.cellCreditEnabled); }
+    if (p.cellCredits && typeof p.cellCredits === 'object') {
+      State.cellCredits = { ...p.cellCredits };
+      localStorage.setItem(STORE.cellCredits, JSON.stringify(State.cellCredits));
+    }
     localStorage.setItem(STORE.seeded, '1');
   },
 
@@ -1627,13 +1661,21 @@ route('dashboard', (root) => {
                       </td>
                     </tr>
                   `;
-                  const rows = items.map((it) => `
+                  const rows = items.map((it) => {
+                    const isCell = State.cellCreditEnabled && (it.name || '').trim().toLowerCase() === 'cell';
+                    let cellExtra = '';
+                    if (isCell && it.dueDate) {
+                      const mKey = it.dueDate.getFullYear() + '-' + String(it.dueDate.getMonth() + 1).padStart(2, '0');
+                      const cred = (State.cellCredits || {})[mKey] || '';
+                      cellExtra = ` <input class="cell-credit-input" type="number" step="0.01" min="0" placeholder="credit" value="${cred}" data-mkey="${mKey}" />`;
+                    }
+                    return `
                     <tr${it.amount === 0 ? ' class="row-muted"' : ''}>
-                      <td>${escapeHtml(it.name)}</td>
+                      <td>${escapeHtml(it.name)}${cellExtra}</td>
                       <td>${it.dueDate ? fmtDateShort.format(it.dueDate) : '—'}</td>
                       <td class="total">${fmtUSD.format(it.amount)}</td>
-                    </tr>
-                  `).join('');
+                    </tr>`;
+                  }).join('');
                   return header + rows;
                 }).join('');
                 return `<div style="overflow-x:auto;"><table class="schedule" style="min-width:0;">
@@ -1656,6 +1698,14 @@ route('dashboard', (root) => {
   if (back) back.onclick = () => { if (canBack) { offset--; render(); } };
   if (fwd) fwd.onclick = () => { if (canFwd) { offset++; render(); } };
   if (todayBtn) todayBtn.onclick = () => { offset = 0; render(); };
+  root.querySelectorAll('.cell-credit-input').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      State.setCellCredit(inp.dataset.mkey, parseFloat(inp.value) || 0);
+      const y = window.scrollY;
+      render();
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    });
+  });
   };
   render();
 });
@@ -2302,6 +2352,10 @@ route('settings', (root) => {
           <input id="subs-monthly" type="checkbox" ${State.subsMonthlyBatch ? 'checked' : ''} style="width:auto;" />
           <label for="subs-monthly" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Batch all Subscriptions into first paycheck of each month</label>
         </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="cell-credit-enable" type="checkbox" ${State.cellCreditEnabled ? 'checked' : ''} style="width:auto;" />
+          <label for="cell-credit-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Enable inline monthly credit on the Cell bill (Dashboard)</label>
+        </div>
       </div>
       <div class="card">
         <h2>Sync (cloud backup)</h2>
@@ -2371,6 +2425,8 @@ route('settings', (root) => {
   });
   const subsMonthlyEl = $('#subs-monthly');
   if (subsMonthlyEl) subsMonthlyEl.onchange = (e) => { State.setSubsMonthlyBatch(e.target.checked); };
+  const cellCreditEl = $('#cell-credit-enable');
+  if (cellCreditEl) cellCreditEl.onchange = (e) => { State.setCellCreditEnabled(e.target.checked); };
 
   const getCreds = () => ({
     email: ($('#sync-email')?.value || '').trim(),
@@ -2652,7 +2708,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','persistCollapsed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','setCellCreditEnabled','setCellCredit','persistCollapsed'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
