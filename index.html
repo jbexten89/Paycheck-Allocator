@@ -1596,7 +1596,7 @@ route('dashboard', (root) => {
               const key = p.payDate.getFullYear() + '-' + String(p.payDate.getMonth() + 1).padStart(2, '0');
               const label = p.payDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
               const cur = byMonth.get(key) || { label, leftover: 0, pays: 0 };
-              cur.leftover += Math.max(0, State.payAmount - p.total);
+              cur.leftover += (State.payAmount - p.total);
               cur.pays += 1;
               byMonth.set(key, cur);
             }
@@ -1607,7 +1607,11 @@ route('dashboard', (root) => {
               <table class="schedule" style="min-width:0;">
                 <thead><tr><th>Month</th><th>Pays</th><th>Leftover</th></tr></thead>
                 <tbody>
-                  ${rows.map((r) => `<tr><td>${r.label}</td><td>${r.pays}</td><td class="total">${fmtUSD.format(r.leftover)}</td></tr>`).join('')}
+                  ${rows.map((r) => {
+                    const short = r.leftover < 0;
+                    const val = Math.abs(r.leftover);
+                    return `<tr><td>${r.label}</td><td>${r.pays}</td><td class="total"${short ? ' style="color:var(--danger);"' : ''}>${fmtUSD.format(val)}${short ? ' short' : ''}</td></tr>`;
+                  }).join('')}
                 </tbody>
               </table>
             </div></div>`;
