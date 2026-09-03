@@ -73,7 +73,7 @@
     }
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; overscroll-behavior: none; }
+  html, body { margin: 0; padding: 0; overscroll-behavior: none; color-scheme: dark; }
   body { overflow-x: clip; }
   body {
     font-family: var(--sans);
@@ -127,15 +127,18 @@
   input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
   input[type="number"]::-webkit-inner-spin-button,
   input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-  /* Kill the yellow autofill background WebKit paints on filled inputs */
+  /* Kill the light autofill background WebKit paints on filled inputs */
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus,
-  input:-webkit-autofill:active {
-    -webkit-text-fill-color: var(--ink);
+  input:-webkit-autofill:active,
+  input:autofill {
+    -webkit-text-fill-color: var(--ink) !important;
     -webkit-box-shadow: 0 0 0 100px var(--paper) inset !important;
-    caret-color: var(--ink);
-    transition: background-color 5000s ease-in-out 0s;
+    box-shadow: 0 0 0 100px var(--paper) inset !important;
+    background-color: var(--paper) !important;
+    caret-color: var(--ink) !important;
+    transition: background-color 9999s ease-in-out 0s;
   }
   input:focus, select:focus { outline: 2px solid var(--amber); outline-offset: 1px; border-color: var(--amber); }
   label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); margin-bottom: 5px; font-weight: 500; }
