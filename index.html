@@ -700,7 +700,8 @@ const STORE = {
   cellCreditEnabled: 'paycheck_allocator.cell_credit_enabled',
   cellCredits: 'paycheck_allocator.cell_credits',
   leftoverMonths: 'paycheck_allocator.leftover_months',
-  batchMonthlyCats: 'paycheck_allocator.batch_monthly_cats'
+  batchMonthlyCats: 'paycheck_allocator.batch_monthly_cats',
+  catShape: 'paycheck_allocator.cat_shape'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -955,28 +956,27 @@ function computeAllocations(bills, payDates, opts = {}) {
         ? Math.max(0, effectiveAmount - Number(bill.initialSaved || 0))
         : effectiveAmount;
       // Detect if this iteration is the last visible pay in the current cycle
-      // (works for both array-count and canonical-count cases).
       const isLastVisibleInCycle = (i + 1 >= payDates.length)
         || (toISO(nextDueCycleFor(bill, payDates[i + 1]).D) !== dueKey);
       const cat = (bill.category || '').trim().toLowerCase();
-      // Optional: any category flagged as single-pay → full amount from one paycheck (last visible in cycle)
-      const singleSub = State.singlePayCats.has(cat) && cycleCount > 1;
-      // Optional: for monthly bills under threshold, take full amount from last pay only
-      const singleSmall = State.singleSmallMonthly
-        && !isAnchorBased
-        && Number(bill.amount) < Number(State.singleSmallThreshold || 500)
-        && cycleCount > 1;
-      // Optional: for 3-paycheck cycles, spread over first 2 only (last pay = 0)
-      const skip3 = State.skipLastOfThree && cycleCount === 3;
+      const shape = (typeof State !== 'undefined' && State.getCatShape) ? State.getCatShape(cat) : 'spread';
       let perPay;
-      if (singleSub) {
+      if (shape === 'monthly-rate') {
+        // Handled by post-process; skip per-cycle allocation.
+        perPay = 0;
+      } else if (shape === 'single-cycle' && cycleCount > 1) {
         perPay = isLastVisibleInCycle ? baseAmount : 0;
-      } else if (singleSmall) {
-        perPay = (payIdxInCycle === cycleCount) ? baseAmount : 0;
-      } else if (skip3) {
+      } else if (shape === 'first-two-of-three' && cycleCount === 3) {
         perPay = (payIdxInCycle === 3) ? 0 : baseAmount / 2;
       } else {
-        perPay = baseAmount / cycleCount;
+        // Spread evenly (default) — with optional global fallback for small monthly bills
+        const singleSmall = shape === 'spread'
+          && State.singleSmallMonthly
+          && !isAnchorBased
+          && Number(bill.amount) < Number(State.singleSmallThreshold || 500)
+          && cycleCount > 1;
+        if (singleSmall) perPay = (payIdxInCycle === cycleCount) ? baseAmount : 0;
+        else perPay = baseAmount / cycleCount;
       }
 
       runningBalance += perPay;
@@ -995,8 +995,9 @@ function computeAllocations(bills, payDates, opts = {}) {
       byBill[bill.id].push({ payDate: P, ...item });
     }
   }
-  if (typeof State !== 'undefined' && State.batchMonthlyCats && State.batchMonthlyCats.size) {
-    batchMonthlyRateCats(perPaycheck, bills, State.batchMonthlyCats);
+  if (typeof State !== 'undefined' && State.catShape) {
+    const monthlyRateCats = new Set(Object.entries(State.catShape).filter(([_, v]) => v === 'monthly-rate').map(([k]) => k));
+    if (monthlyRateCats.size) batchMonthlyRateCats(perPaycheck, bills, monthlyRateCats);
   }
   return { perPaycheck, byBill };
 }
@@ -1144,6 +1145,15 @@ const State = {
     catch { this.batchMonthlyCats = new Set(); }
     // Migrate legacy subsMonthlyBatch boolean
     if (this.subsMonthlyBatch) this.batchMonthlyCats.add('subscriptions');
+    // Unified per-category payment shape. Values: 'spread' | 'single-cycle' | 'first-two-of-three' | 'monthly-rate'
+    try { this.catShape = JSON.parse(localStorage.getItem(STORE.catShape) || '{}') || {}; }
+    catch { this.catShape = {}; }
+    // One-time migration from legacy singlePayCats + batchMonthlyCats sets
+    if (!localStorage.getItem(STORE.catShape)) {
+      for (const k of this.singlePayCats) if (!this.catShape[k]) this.catShape[k] = 'single-cycle';
+      for (const k of this.batchMonthlyCats) this.catShape[k] = 'monthly-rate'; // batch was the winner
+      localStorage.setItem(STORE.catShape, JSON.stringify(this.catShape));
+    }
     if (!localStorage.getItem(STORE.seeded)) {
       this.bills = defaultMonthlyBills();
       localStorage.setItem(STORE.seeded, '1');
@@ -1186,6 +1196,19 @@ const State = {
     localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...this.batchMonthlyCats]));
   },
   isBatchMonthlyCat(cat) { return this.batchMonthlyCats.has((cat || '').toLowerCase()); },
+  setCatShape(cat, shape) {
+    const key = (cat || '').toLowerCase();
+    if (!key) return;
+    if (!shape || shape === 'spread') delete this.catShape[key];
+    else this.catShape[key] = shape;
+    localStorage.setItem(STORE.catShape, JSON.stringify(this.catShape));
+    // Keep legacy sets aligned so any code still reading them agrees
+    this.singlePayCats.delete(key); if (shape === 'single-cycle') this.singlePayCats.add(key);
+    localStorage.setItem(STORE.singlePayCats, JSON.stringify([...this.singlePayCats]));
+    this.batchMonthlyCats.delete(key); if (shape === 'monthly-rate') this.batchMonthlyCats.add(key);
+    localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...this.batchMonthlyCats]));
+  },
+  getCatShape(cat) { return this.catShape[(cat || '').toLowerCase()] || 'spread'; },
   toggleSinglePayCat(cat, on) {
     const key = cat.toLowerCase();
     if (on) this.singlePayCats.add(key); else this.singlePayCats.delete(key);
@@ -1312,7 +1335,8 @@ const Sync = {
       cellCreditEnabled: State.cellCreditEnabled,
       cellCredits: State.cellCredits,
       leftoverMonths: State.leftoverMonths,
-      batchMonthlyCats: [...State.batchMonthlyCats]
+      batchMonthlyCats: [...State.batchMonthlyCats],
+      catShape: State.catShape
     };
   },
   applyPayload(p) {
@@ -1345,6 +1369,10 @@ const Sync = {
     if (Array.isArray(p.batchMonthlyCats)) {
       State.batchMonthlyCats = new Set(p.batchMonthlyCats.map((s) => String(s).toLowerCase()));
       localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...State.batchMonthlyCats]));
+    }
+    if (p.catShape && typeof p.catShape === 'object') {
+      State.catShape = { ...p.catShape };
+      localStorage.setItem(STORE.catShape, JSON.stringify(State.catShape));
     }
     localStorage.setItem(STORE.seeded, '1');
   },
@@ -2364,53 +2392,37 @@ route('settings', (root) => {
           <input id="show-zero" type="checkbox" ${State.showZeroBills ? 'checked' : ''} style="width:auto;" />
           <label for="show-zero" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show $0 bills on dashboard (grayed)</label>
         </div>
-        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
-          <input id="skip-third" type="checkbox" ${State.skipLastOfThree ? 'checked' : ''} style="width:auto;" />
-          <label for="skip-third" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">For 3-paycheck cycles, use first 2 only</label>
+        <div style="margin-top:14px;">
+          <label style="text-transform:uppercase; letter-spacing:0.08em; font-size:11px; color:var(--ink-muted); margin-bottom:6px; display:block;">Payment shape (per category):</label>
+          ${(() => {
+            const present = State.orderedCategories().filter((c) => c !== 'Uncategorized');
+            const flagged = Object.keys(State.catShape || {});
+            const seen = new Set();
+            const list = [];
+            for (const c of present) { const k = c.toLowerCase(); if (!seen.has(k)) { seen.add(k); list.push(c); } }
+            for (const k of flagged) { if (!seen.has(k)) { seen.add(k); list.push(k.replace(/\b\w/g, (m) => m.toUpperCase())); } }
+            if (!list.length) return `<div class="hint" style="font-size:12px;">Add bills with categories to configure this.</div>`;
+            const shapes = [
+              ['spread',             'Spread evenly'],
+              ['single-cycle',       'Once per cycle (last pay)'],
+              ['first-two-of-three', 'First-two-of-three'],
+              ['monthly-rate',       'Monthly rate, first pay of month']
+            ];
+            return list.map((cat) => `
+              <div style="margin-top:6px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <span style="font-size:13px; color:var(--ink); min-width:110px;">${escapeHtml(cat)}</span>
+                <select class="cat-shape" data-cat="${escapeAttr(cat)}" style="width:auto; max-width:220px;">
+                  ${shapes.map(([v, l]) => `<option value="${v}" ${State.getCatShape(cat) === v ? 'selected' : ''}>${l}</option>`).join('')}
+                </select>
+              </div>
+            `).join('');
+          })()}
         </div>
-        <div style="margin-top:10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div style="margin-top:14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
           <input id="single-small" type="checkbox" ${State.singleSmallMonthly ? 'checked' : ''} style="width:auto;" />
-          <label for="single-small" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Monthly bills under</label>
+          <label for="single-small" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">"Spread evenly" fallback: monthly bills under</label>
           <input id="single-small-threshold" type="number" min="1" step="1" value="${State.singleSmallThreshold}" style="width:80px;" />
-          <label style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">take from last paycheck only</label>
-        </div>
-        <div style="margin-top:14px;">
-          <label style="text-transform:uppercase; letter-spacing:0.08em; font-size:11px; color:var(--ink-muted); margin-bottom:6px; display:block;">Take full amount from one paycheck for:</label>
-          ${(() => {
-            // Auto-discover categories from user's bills; also keep any that the user
-            // has previously flagged single-pay (in case they no longer have bills in them).
-            const present = State.orderedCategories().filter((c) => c !== 'Uncategorized');
-            const flagged = [...(State.singlePayCats || [])];
-            const seen = new Set();
-            const list = [];
-            for (const c of present) { const k = c.toLowerCase(); if (!seen.has(k)) { seen.add(k); list.push(c); } }
-            for (const k of flagged) { if (!seen.has(k)) { seen.add(k); list.push(k.replace(/\b\w/g, (m) => m.toUpperCase())); } }
-            if (!list.length) return `<div class="hint" style="font-size:12px;">Add bills with categories to configure this.</div>`;
-            return list.map((cat) => `
-              <div style="margin-top:6px; display:flex; align-items:center; gap:10px;">
-                <input class="single-pay-cat" type="checkbox" data-cat="${escapeAttr(cat)}" ${State.isSinglePayCat(cat) ? 'checked' : ''} style="width:auto;" id="spc-${cat.replace(/\W+/g,'-')}" />
-                <label for="spc-${cat.replace(/\W+/g,'-')}" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">${escapeHtml(cat)}</label>
-              </div>
-            `).join('');
-          })()}
-        </div>
-        <div style="margin-top:14px;">
-          <label style="text-transform:uppercase; letter-spacing:0.08em; font-size:11px; color:var(--ink-muted); margin-bottom:6px; display:block;">Batch monthly-rate into first paycheck of each month for:</label>
-          ${(() => {
-            const present = State.orderedCategories().filter((c) => c !== 'Uncategorized');
-            const flagged = [...(State.batchMonthlyCats || [])];
-            const seen = new Set();
-            const list = [];
-            for (const c of present) { const k = c.toLowerCase(); if (!seen.has(k)) { seen.add(k); list.push(c); } }
-            for (const k of flagged) { if (!seen.has(k)) { seen.add(k); list.push(k.replace(/\b\w/g, (m) => m.toUpperCase())); } }
-            if (!list.length) return `<div class="hint" style="font-size:12px;">Add bills with categories to configure this.</div>`;
-            return list.map((cat) => `
-              <div style="margin-top:6px; display:flex; align-items:center; gap:10px;">
-                <input class="batch-monthly-cat" type="checkbox" data-cat="${escapeAttr(cat)}" ${State.isBatchMonthlyCat(cat) ? 'checked' : ''} style="width:auto;" id="bmc-${cat.replace(/\W+/g,'-')}" />
-                <label for="bmc-${cat.replace(/\W+/g,'-')}" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">${escapeHtml(cat)}</label>
-              </div>
-            `).join('');
-          })()}
+          <label style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">take from last pay only</label>
         </div>
         <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
           <input id="cell-credit-enable" type="checkbox" ${State.cellCreditEnabled ? 'checked' : ''} style="width:auto;" />
@@ -2478,14 +2490,10 @@ route('settings', (root) => {
   $('#pay-amount').onchange = (e) => { State.setPayAmount(parseFloat(e.target.value) || 0); };
   $('#theme').onchange = (e) => { State.setTheme(e.target.value); };
   $('#show-zero').onchange = (e) => { State.setShowZeroBills(e.target.checked); };
-  $('#skip-third').onchange = (e) => { State.setSkipLastOfThree(e.target.checked); };
   $('#single-small').onchange = (e) => { State.setSingleSmallMonthly(e.target.checked); };
   $('#single-small-threshold').onchange = (e) => { State.setSingleSmallThreshold(parseFloat(e.target.value) || 500); };
-  $$('.single-pay-cat').forEach((el) => {
-    el.onchange = () => { State.toggleSinglePayCat(el.dataset.cat, el.checked); };
-  });
-  $$('.batch-monthly-cat').forEach((el) => {
-    el.onchange = () => { State.toggleBatchMonthlyCat(el.dataset.cat, el.checked); };
+  $$('.cat-shape').forEach((el) => {
+    el.onchange = () => { State.setCatShape(el.dataset.cat, el.value); };
   });
   const cellCreditEl = $('#cell-credit-enable');
   if (cellCreditEl) cellCreditEl.onchange = (e) => { State.setCellCreditEnabled(e.target.checked); };
@@ -2770,7 +2778,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCellCreditEnabled','setCellCredit','setLeftoverMonths','persistCollapsed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','persistCollapsed'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
