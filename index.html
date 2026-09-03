@@ -1588,10 +1588,12 @@ route('dashboard', (root) => {
     ${
       State.payAmount > 0
         ? (() => {
+            const monthsToShow = parseInt(sessionStorage.getItem('dash.leftoverMonths') || '6', 10);
+            const spanCount = monthsToShow >= 12 ? 52 : 26;
             const byMonth = new Map();
             const startIdx = perPaycheck.findIndex((p) => p.payDate >= (new Date(new Date().setHours(0,0,0,0))));
             const from = startIdx === -1 ? 0 : startIdx;
-            const window = perPaycheck.slice(from, from + 26);
+            const window = perPaycheck.slice(from, from + spanCount);
             for (const p of window) {
               const key = p.payDate.getFullYear() + '-' + String(p.payDate.getMonth() + 1).padStart(2, '0');
               const label = p.payDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
@@ -1600,10 +1602,18 @@ route('dashboard', (root) => {
               cur.pays += 1;
               byMonth.set(key, cur);
             }
-            const rows = [...byMonth.values()].slice(0, 6);
+            const rows = [...byMonth.values()].slice(0, monthsToShow);
             if (!rows.length) return '';
+            const totalLeft = rows.reduce((s, r) => s + r.leftover, 0);
+            const totalShort = totalLeft < 0;
+            const totalPays = rows.reduce((s, r) => s + r.pays, 0);
             return `<div style="margin-bottom:16px;"><div class="card">
-              <h2 class="accent">Monthly leftover · next 6 months</h2>
+              <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+                <h2 class="accent" style="margin:0;">Monthly leftover · next ${rows.length} months</h2>
+                <div class="segmented" role="radiogroup" aria-label="Months">
+                  ${[6, 12].map((n) => `<button data-leftover-months="${n}" class="${n===monthsToShow?'active':''}">${n}</button>`).join('')}
+                </div>
+              </div>
               <table class="schedule" style="min-width:0;">
                 <thead><tr><th>Month</th><th>Pays</th><th>Leftover</th></tr></thead>
                 <tbody>
@@ -1612,6 +1622,7 @@ route('dashboard', (root) => {
                     const val = Math.abs(r.leftover);
                     return `<tr><td>${r.label}</td><td>${r.pays}</td><td class="total"${short ? ' style="color:var(--danger);"' : ''}>${fmtUSD.format(val)}${short ? ' short' : ''}</td></tr>`;
                   }).join('')}
+                  <tr class="sched-grand-total"><td>Total</td><td>${totalPays}</td><td class="total"${totalShort ? ' style="color:var(--danger);"' : ''}>${fmtUSD.format(Math.abs(totalLeft))}${totalShort ? ' short' : ''}</td></tr>
                 </tbody>
               </table>
             </div></div>`;
@@ -1705,6 +1716,14 @@ route('dashboard', (root) => {
       render();
       requestAnimationFrame(() => window.scrollTo(0, y));
     });
+  });
+  root.querySelectorAll('[data-leftover-months]').forEach((btn) => {
+    btn.onclick = () => {
+      sessionStorage.setItem('dash.leftoverMonths', btn.dataset.leftoverMonths);
+      const y = window.scrollY;
+      render();
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    };
   });
   };
   render();
