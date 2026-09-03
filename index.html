@@ -127,16 +127,21 @@
   input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
   input[type="number"]::-webkit-inner-spin-button,
   input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-  /* Kill the light autofill background WebKit paints on filled inputs */
+  /* Kill the light autofill background WebKit paints on filled inputs.
+     The background-clip: text trick clips WebKit's autofill background to just
+     the text glyphs, letting the real input background show through — this is
+     the only reliable fix on iOS Safari where box-shadow inset doesn't stick. */
+  input { color-scheme: dark; }
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus,
   input:-webkit-autofill:active,
   input:autofill {
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
     -webkit-text-fill-color: var(--ink) !important;
     -webkit-box-shadow: 0 0 0 100px var(--paper) inset !important;
     box-shadow: 0 0 0 100px var(--paper) inset !important;
-    background-color: var(--paper) !important;
     caret-color: var(--ink) !important;
     transition: background-color 9999s ease-in-out 0s;
   }
