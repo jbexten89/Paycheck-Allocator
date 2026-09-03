@@ -2324,12 +2324,23 @@ route('settings', (root) => {
         </div>
         <div style="margin-top:14px;">
           <label style="text-transform:uppercase; letter-spacing:0.08em; font-size:11px; color:var(--ink-muted); margin-bottom:6px; display:block;">Take full amount from one paycheck for:</label>
-          ${['Subscriptions','Non-Monthly','Fun Stuff','Maint Home','Vehicles'].map((cat) => `
-            <div style="margin-top:6px; display:flex; align-items:center; gap:10px;">
-              <input class="single-pay-cat" type="checkbox" data-cat="${escapeAttr(cat)}" ${State.isSinglePayCat(cat) ? 'checked' : ''} style="width:auto;" id="spc-${cat.replace(/\W+/g,'-')}" />
-              <label for="spc-${cat.replace(/\W+/g,'-')}" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">${escapeHtml(cat)}</label>
-            </div>
-          `).join('')}
+          ${(() => {
+            // Auto-discover categories from user's bills; also keep any that the user
+            // has previously flagged single-pay (in case they no longer have bills in them).
+            const present = State.orderedCategories().filter((c) => c !== 'Uncategorized');
+            const flagged = [...(State.singlePayCats || [])];
+            const seen = new Set();
+            const list = [];
+            for (const c of present) { const k = c.toLowerCase(); if (!seen.has(k)) { seen.add(k); list.push(c); } }
+            for (const k of flagged) { if (!seen.has(k)) { seen.add(k); list.push(k.replace(/\b\w/g, (m) => m.toUpperCase())); } }
+            if (!list.length) return `<div class="hint" style="font-size:12px;">Add bills with categories to configure this.</div>`;
+            return list.map((cat) => `
+              <div style="margin-top:6px; display:flex; align-items:center; gap:10px;">
+                <input class="single-pay-cat" type="checkbox" data-cat="${escapeAttr(cat)}" ${State.isSinglePayCat(cat) ? 'checked' : ''} style="width:auto;" id="spc-${cat.replace(/\W+/g,'-')}" />
+                <label for="spc-${cat.replace(/\W+/g,'-')}" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">${escapeHtml(cat)}</label>
+              </div>
+            `).join('');
+          })()}
         </div>
         <div style="margin-top:14px; display:flex; align-items:center; gap:10px;">
           <input id="subs-monthly" type="checkbox" ${State.subsMonthlyBatch ? 'checked' : ''} style="width:auto;" />
