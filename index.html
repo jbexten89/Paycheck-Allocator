@@ -276,6 +276,7 @@
   }
   .setaside-bar-fill.over { background: var(--danger); }
   .leftover-amount { font-size: 16px; font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; }
+  .leftover-amount.short { color: var(--danger); }
   .cell-credit-input {
     display: inline-block !important;
     width: 70px !important;
@@ -1558,7 +1559,11 @@ route('dashboard', (root) => {
         }
         <div class="hint">${
           State.payAmount > 0 && next
-            ? `<span class="leftover-amount">${fmtUSD.format(Math.max(0, State.payAmount - next.total))}</span> leftover`
+            ? (() => {
+                const over = next.total > State.payAmount;
+                const diff = over ? next.total - State.payAmount : State.payAmount - next.total;
+                return `<span class="leftover-amount${over ? ' short' : ''}">${fmtUSD.format(diff)}</span> ${over ? 'short' : 'leftover'}`;
+              })()
             : `across ${next ? next.items.length : 0} bill${next && next.items.length === 1 ? '' : 's'}`
         }</div>
       </div>
