@@ -699,7 +699,8 @@ const STORE = {
   subsMonthlyBatch: 'paycheck_allocator.subs_monthly_batch',
   cellCreditEnabled: 'paycheck_allocator.cell_credit_enabled',
   cellCredits: 'paycheck_allocator.cell_credits',
-  leftoverMonths: 'paycheck_allocator.leftover_months'
+  leftoverMonths: 'paycheck_allocator.leftover_months',
+  batchMonthlyCats: 'paycheck_allocator.batch_monthly_cats'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -847,18 +848,19 @@ function canonicalCycleCount(payStart, stepDays, prevDue, D) {
   return Math.max(0, nLast - nFirst + 1);
 }
 
-// Replace per-cycle subscription allocations with one lump sum on the first
-// paycheck of each month, equal to each subscription's monthly-equivalent rate.
-function batchSubscriptionsMonthly(perPaycheck, bills) {
-  if (!perPaycheck.length) return perPaycheck;
-  const subs = bills.filter((b) => (b.category || '').trim().toLowerCase() === 'subscriptions' && b.amount > 0 && !b.archived);
-  if (!subs.length) return perPaycheck;
+// Replace per-cycle allocations with one lump sum on the first paycheck of each
+// calendar month, equal to each bill's monthly-equivalent rate. Applied only
+// to bills whose category is in `catSet` (lowercased Set of category names).
+function batchMonthlyRateCats(perPaycheck, bills, catSet) {
+  if (!perPaycheck.length || !catSet || !catSet.size) return perPaycheck;
+  const targeted = bills.filter((b) => catSet.has((b.category || '').trim().toLowerCase()) && b.amount > 0 && !b.archived);
+  if (!targeted.length) return perPaycheck;
   const monthlyRate = (b) => {
     if (b.recurrence === 'everyNMonths') return Number(b.amount) / Math.max(1, Number(b.intervalMonths) || 1);
     if (b.recurrence === 'everyNWeeks')  return Number(b.amount) * (52 / (Math.max(1, Number(b.intervalWeeks) || 1) * 12));
     return Number(b.amount); // monthly / day-of-month
   };
-  const subIds = new Set(subs.map((b) => b.id));
+  const subIds = new Set(targeted.map((b) => b.id));
   // Strip every existing subscription item
   for (const p of perPaycheck) {
     let removed = 0;
@@ -876,7 +878,7 @@ function batchSubscriptionsMonthly(perPaycheck, bills) {
   });
   for (const idx of firstByMonth.values()) {
     const p = perPaycheck[idx];
-    for (const b of subs) {
+    for (const b of targeted) {
       const amt = monthlyRate(b);
       if (amt <= 0) continue;
       p.items.push({ billId: b.id, name: b.name, color: b.color, amount: amt, dueDate: p.payDate, paychecksInCycle: 1 });
@@ -993,8 +995,8 @@ function computeAllocations(bills, payDates, opts = {}) {
       byBill[bill.id].push({ payDate: P, ...item });
     }
   }
-  if (typeof State !== 'undefined' && State.subsMonthlyBatch) {
-    batchSubscriptionsMonthly(perPaycheck, bills);
+  if (typeof State !== 'undefined' && State.batchMonthlyCats && State.batchMonthlyCats.size) {
+    batchMonthlyRateCats(perPaycheck, bills, State.batchMonthlyCats);
   }
   return { perPaycheck, byBill };
 }
@@ -1138,6 +1140,10 @@ const State = {
     catch { this.cellCredits = {}; }
     const lm = parseInt(localStorage.getItem(STORE.leftoverMonths) || '6', 10);
     this.leftoverMonths = [6, 12].includes(lm) ? lm : 6;
+    try { this.batchMonthlyCats = new Set((JSON.parse(localStorage.getItem(STORE.batchMonthlyCats) || '[]') || []).map((s) => String(s).toLowerCase())); }
+    catch { this.batchMonthlyCats = new Set(); }
+    // Migrate legacy subsMonthlyBatch boolean
+    if (this.subsMonthlyBatch) this.batchMonthlyCats.add('subscriptions');
     if (!localStorage.getItem(STORE.seeded)) {
       this.bills = defaultMonthlyBills();
       localStorage.setItem(STORE.seeded, '1');
@@ -1174,6 +1180,12 @@ const State = {
     localStorage.setItem(STORE.cellCredits, JSON.stringify(this.cellCredits));
   },
   setLeftoverMonths(n) { this.leftoverMonths = n; localStorage.setItem(STORE.leftoverMonths, String(n)); },
+  toggleBatchMonthlyCat(cat, on) {
+    const key = cat.toLowerCase();
+    if (on) this.batchMonthlyCats.add(key); else this.batchMonthlyCats.delete(key);
+    localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...this.batchMonthlyCats]));
+  },
+  isBatchMonthlyCat(cat) { return this.batchMonthlyCats.has((cat || '').toLowerCase()); },
   toggleSinglePayCat(cat, on) {
     const key = cat.toLowerCase();
     if (on) this.singlePayCats.add(key); else this.singlePayCats.delete(key);
@@ -1299,7 +1311,8 @@ const Sync = {
       subsMonthlyBatch: State.subsMonthlyBatch,
       cellCreditEnabled: State.cellCreditEnabled,
       cellCredits: State.cellCredits,
-      leftoverMonths: State.leftoverMonths
+      leftoverMonths: State.leftoverMonths,
+      batchMonthlyCats: [...State.batchMonthlyCats]
     };
   },
   applyPayload(p) {
@@ -1329,6 +1342,10 @@ const Sync = {
       localStorage.setItem(STORE.cellCredits, JSON.stringify(State.cellCredits));
     }
     if (typeof p.leftoverMonths === 'number') { State.setLeftoverMonths(p.leftoverMonths); }
+    if (Array.isArray(p.batchMonthlyCats)) {
+      State.batchMonthlyCats = new Set(p.batchMonthlyCats.map((s) => String(s).toLowerCase()));
+      localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...State.batchMonthlyCats]));
+    }
     localStorage.setItem(STORE.seeded, '1');
   },
 
@@ -2377,9 +2394,23 @@ route('settings', (root) => {
             `).join('');
           })()}
         </div>
-        <div style="margin-top:14px; display:flex; align-items:center; gap:10px;">
-          <input id="subs-monthly" type="checkbox" ${State.subsMonthlyBatch ? 'checked' : ''} style="width:auto;" />
-          <label for="subs-monthly" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Batch all Subscriptions into first paycheck of each month</label>
+        <div style="margin-top:14px;">
+          <label style="text-transform:uppercase; letter-spacing:0.08em; font-size:11px; color:var(--ink-muted); margin-bottom:6px; display:block;">Batch monthly-rate into first paycheck of each month for:</label>
+          ${(() => {
+            const present = State.orderedCategories().filter((c) => c !== 'Uncategorized');
+            const flagged = [...(State.batchMonthlyCats || [])];
+            const seen = new Set();
+            const list = [];
+            for (const c of present) { const k = c.toLowerCase(); if (!seen.has(k)) { seen.add(k); list.push(c); } }
+            for (const k of flagged) { if (!seen.has(k)) { seen.add(k); list.push(k.replace(/\b\w/g, (m) => m.toUpperCase())); } }
+            if (!list.length) return `<div class="hint" style="font-size:12px;">Add bills with categories to configure this.</div>`;
+            return list.map((cat) => `
+              <div style="margin-top:6px; display:flex; align-items:center; gap:10px;">
+                <input class="batch-monthly-cat" type="checkbox" data-cat="${escapeAttr(cat)}" ${State.isBatchMonthlyCat(cat) ? 'checked' : ''} style="width:auto;" id="bmc-${cat.replace(/\W+/g,'-')}" />
+                <label for="bmc-${cat.replace(/\W+/g,'-')}" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">${escapeHtml(cat)}</label>
+              </div>
+            `).join('');
+          })()}
         </div>
         <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
           <input id="cell-credit-enable" type="checkbox" ${State.cellCreditEnabled ? 'checked' : ''} style="width:auto;" />
@@ -2453,8 +2484,9 @@ route('settings', (root) => {
   $$('.single-pay-cat').forEach((el) => {
     el.onchange = () => { State.toggleSinglePayCat(el.dataset.cat, el.checked); };
   });
-  const subsMonthlyEl = $('#subs-monthly');
-  if (subsMonthlyEl) subsMonthlyEl.onchange = (e) => { State.setSubsMonthlyBatch(e.target.checked); };
+  $$('.batch-monthly-cat').forEach((el) => {
+    el.onchange = () => { State.toggleBatchMonthlyCat(el.dataset.cat, el.checked); };
+  });
   const cellCreditEl = $('#cell-credit-enable');
   if (cellCreditEl) cellCreditEl.onchange = (e) => { State.setCellCreditEnabled(e.target.checked); };
 
@@ -2738,7 +2770,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','setCellCreditEnabled','setCellCredit','setLeftoverMonths','persistCollapsed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCellCreditEnabled','setCellCredit','setLeftoverMonths','persistCollapsed'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
