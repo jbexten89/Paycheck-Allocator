@@ -331,7 +331,7 @@
   /* Bills */
   .bill-row {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr auto auto;
     gap: 12px;
     align-items: center;
     padding: 5px 12px;
@@ -343,8 +343,10 @@
   }
   .bill-row:hover { background: var(--paper); }
   .bill-row:last-child { border-bottom: none; }
-  .bill-row { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-  .cat-header { touch-action: none; }
+  .bill-row { touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .cat-header { touch-action: pan-y; }
+  .drag-handle { touch-action: none; cursor: grab; color: var(--ink-muted); opacity: 0.5; letter-spacing: -3px; padding: 4px 6px; user-select: none; }
+  .drag-handle:hover { opacity: 1; color: var(--amber); }
   body.drag-lock { touch-action: none !important; overflow: hidden !important; }
   body.drag-lock * { touch-action: none !important; }
   .bill-row.reorder-source { opacity: 0.3; }
@@ -1812,6 +1814,7 @@ route('bills', (root) => {
                   <span class="cat-name">${escapeHtml(cat)}</span>
                   <span class="cat-meta">${bills.length} bill${bills.length === 1 ? '' : 's'} · ${fmtUSD.format(catTotal)}</span>
                   <span class="cat-spacer"></span>
+                  <span class="drag-handle" aria-label="Drag to reorder">⋮⋮</span>
                   <button class="cat-delete" data-cat-delete="${escapeAttr(cat)}" aria-label="Delete category">✕</button>
                 </div>
                 <div class="bill-list" role="list">
@@ -1828,6 +1831,7 @@ route('bills', (root) => {
                         }${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}${b.archived ? `<span class="badge">archived</span>` : ''}</span>
                       </div>
                       <div class="bill-amount">${fmtUSD.format(b.amount)}</div>
+                      <span class="drag-handle" aria-label="Drag to reorder">⋮⋮</span>
                     </div>
                   `).join('')}
                 </div>
@@ -1864,8 +1868,11 @@ route('bills', (root) => {
     items.forEach((item) => {
       item.addEventListener('pointerdown', (e) => {
         if (e.button !== undefined && e.button !== 0) return;
-        const startX = e.clientX, startY = e.clientY;
         const isTouch = e.pointerType === 'touch';
+        // On touch, only start drag if the pointer is on a drag handle
+        // (so ordinary touches on the row still allow the page to scroll).
+        if (isTouch && !(e.target && e.target.closest('.drag-handle'))) return;
+        const startX = e.clientX, startY = e.clientY;
         let ghost = null;
         let holdTimer = null;
         let armed = !isTouch; // mouse arms immediately, touch after long-press
