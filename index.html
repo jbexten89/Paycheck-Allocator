@@ -2519,18 +2519,6 @@ route('settings', (root) => {
           <button class="btn" id="export">Export JSON</button>
           <label class="btn" for="import-file">Import JSON</label>
           <input id="import-file" type="file" accept="application/json" style="display:none;" />
-          <select id="load-template" style="max-width:200px;">
-            <option value="">Load template…</option>
-            <option value="all">All categories</option>
-            <option value="monthly">Monthly</option>
-            <option value="flexible">Flexible</option>
-            <option value="nonmonthly">Non-Monthly</option>
-            <option value="fun">Fun Stuff</option>
-            <option value="3d">3D Printing</option>
-            <option value="subs">Subscriptions</option>
-            <option value="maint">Maint Home</option>
-            <option value="vehicles">Vehicles</option>
-          </select>
           <button class="btn" id="reset-cat-order">Reset category order</button>
           <button class="btn btn-danger" id="clear-all">Clear all data</button>
         </div>
@@ -2548,7 +2536,7 @@ route('settings', (root) => {
         <h2>Getting started</h2>
         <ol style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
           <li>Set your <strong>Pay start date</strong>, <strong>Frequency</strong>, and <strong>Paycheck amount</strong> in <em>General</em>.</li>
-          <li>Go to <strong>Bills</strong> and add or edit bills — or load a sample set from <em>Data → Load template</em>.</li>
+          <li>Go to <strong>Bills</strong> and add or edit bills — the app seeds a small sample set on your first launch so you have something to explore.</li>
           <li>Open <strong>Dashboard</strong> to see how much to set aside from your next paycheck, and the monthly leftover forecast.</li>
           <li>Open <strong>Schedule</strong> for the full grid of bills across future paychecks.</li>
           <li>Optionally sign in under <em>Sync</em> to back up and sync across devices.</li>
@@ -2708,36 +2696,6 @@ route('settings', (root) => {
       } catch (err) { alert('Import failed: ' + err.message); }
     };
     reader.readAsText(file);
-    e.target.value = '';
-  };
-  const templateFns = {
-    monthly:    { label: 'Monthly',     fn: defaultMonthlyBills },
-    flexible:   { label: 'Flexible',    fn: defaultFlexibleBills },
-    nonmonthly: { label: 'Non-Monthly', fn: defaultNonMonthlyBills },
-    fun:        { label: 'Fun Stuff',   fn: defaultFunStuffBills },
-    '3d':       { label: '3D Printing', fn: default3DPrintingBills },
-    subs:       { label: 'Subscriptions', fn: defaultSubscriptionBills },
-    maint:      { label: 'Maint Home',  fn: defaultMaintHomeBills },
-    vehicles:   { label: 'Vehicles',    fn: defaultVehiclesBills }
-  };
-  $('#load-template').onchange = (e) => {
-    const key = e.target.value;
-    if (!key) return;
-    let bills, label;
-    if (key === 'all') {
-      bills = Object.values(templateFns).flatMap((t) => t.fn());
-      label = 'all categories';
-    } else if (templateFns[key]) {
-      bills = templateFns[key].fn();
-      label = templateFns[key].label;
-    } else {
-      e.target.value = ''; return;
-    }
-    confirmDialog(`Add ${bills.length} default ${label} bills to your list? Existing bills stay put.`, () => {
-      State.bills = [...State.bills, ...bills];
-      State.saveBills();
-      navigate();
-    });
     e.target.value = '';
   };
   $('#reset-cat-order').onclick = () => {
