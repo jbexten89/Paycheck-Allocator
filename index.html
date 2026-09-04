@@ -736,7 +736,8 @@ const STORE = {
   cellCredits: 'paycheck_allocator.cell_credits',
   leftoverMonths: 'paycheck_allocator.leftover_months',
   batchMonthlyCats: 'paycheck_allocator.batch_monthly_cats',
-  catShape: 'paycheck_allocator.cat_shape'
+  catShape: 'paycheck_allocator.cat_shape',
+  onboarded: 'paycheck_allocator.onboarded'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1183,6 +1184,7 @@ const State = {
     // Unified per-category payment shape. Values: 'spread' | 'single-cycle' | 'first-two-of-three' | 'monthly-rate'
     try { this.catShape = JSON.parse(localStorage.getItem(STORE.catShape) || '{}') || {}; }
     catch { this.catShape = {}; }
+    this.onboarded = localStorage.getItem(STORE.onboarded) === '1';
     // One-time migration from legacy singlePayCats + batchMonthlyCats sets
     if (!localStorage.getItem(STORE.catShape)) {
       for (const k of this.singlePayCats) if (!this.catShape[k]) this.catShape[k] = 'single-cycle';
@@ -1244,6 +1246,7 @@ const State = {
     localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...this.batchMonthlyCats]));
   },
   getCatShape(cat) { return this.catShape[(cat || '').toLowerCase()] || 'spread'; },
+  setOnboarded(v) { this.onboarded = !!v; localStorage.setItem(STORE.onboarded, v ? '1' : '0'); },
   toggleSinglePayCat(cat, on) {
     const key = cat.toLowerCase();
     if (on) this.singlePayCats.add(key); else this.singlePayCats.delete(key);
@@ -2546,6 +2549,7 @@ route('settings', (root) => {
           <li>Open <strong>Schedule</strong> for the full grid of bills across future paychecks.</li>
           <li>Optionally sign in under <em>Sync</em> to back up and sync across devices.</li>
         </ol>
+        <button class="btn" id="restart-onboarding" style="margin-top:12px;">Restart welcome</button>
       </div>
       <div class="card">
         <h2>How allocations work</h2>
@@ -2606,6 +2610,8 @@ route('settings', (root) => {
     </div>
   `;
 
+  const restartBtn = $('#restart-onboarding');
+  if (restartBtn) restartBtn.onclick = () => { if (typeof showOnboarding === 'function') showOnboarding(); };
   $$('.tab-btn').forEach((btn) => {
     btn.onclick = () => {
       const tab = btn.dataset.tab;
@@ -2752,7 +2758,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','persistCollapsed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
@@ -2761,6 +2767,73 @@ Sync.on(() => { const el = document.getElementById('sync-status'); if (el) el.te
 Sync.init();
 
 navigate();
+
+// First-run wizard (never signed in with sync yet, and never dismissed)
+if (!State.onboarded && !Sync.user) {
+  setTimeout(showOnboarding, 200);
+}
+
+function showOnboarding() {
+  const today = toISO(new Date());
+  openModal(`
+    <div class="modal-header"><h3>Welcome</h3><button class="btn btn-ghost" data-x="close" aria-label="Close">✕</button></div>
+    <div class="modal-body">
+      <p style="color:var(--ink-soft); margin-top:0;">Paycheck Allocator splits each bill across the paychecks that fall before its due date. A few quick answers will make it useful right away.</p>
+      <div class="form-grid">
+        <div class="full">
+          <label>Paycheck amount (net)</label>
+          <input name="ob-pay" type="number" min="0" step="0.01" placeholder="e.g. 2500" value="${State.payAmount || ''}" />
+        </div>
+        <div>
+          <label>Pay frequency</label>
+          <select name="ob-freq">
+            ${['biweekly','weekly','semi-monthly','monthly'].map((f) => `<option value="${f}" ${f === State.frequency ? 'selected' : ''}>${f}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Last / next payday</label>
+          <input name="ob-start" type="date" value="${State.payStart || today}" />
+        </div>
+        <div class="full" style="margin-top:8px;">
+          <label>Starting bills</label>
+          <div style="display:flex; align-items:center; gap:10px; margin-top:4px;">
+            <input type="radio" name="ob-start-mode" value="keep" id="ob-keep" ${State.bills.length ? 'checked' : ''} style="width:auto;" />
+            <label for="ob-keep" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Keep what's here (${State.bills.length} bill${State.bills.length === 1 ? '' : 's'})</label>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
+            <input type="radio" name="ob-start-mode" value="fresh" id="ob-fresh" ${State.bills.length ? '' : 'checked'} style="width:auto;" />
+            <label for="ob-fresh" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Clear all sample bills and start fresh</label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span class="spacer"></span>
+      <button class="btn" data-x="close">Skip</button>
+      <button class="btn btn-primary" data-x="save">Get started</button>
+    </div>
+  `, {
+    onMount(el, close) {
+      el.querySelectorAll('[data-x="close"]').forEach((x) => x.onclick = () => {
+        State.setOnboarded(true);
+        close();
+      });
+      el.querySelector('[data-x="save"]').onclick = () => {
+        const pay = parseFloat(el.querySelector('[name="ob-pay"]').value) || 0;
+        const freq = el.querySelector('[name="ob-freq"]').value;
+        const start = el.querySelector('[name="ob-start"]').value;
+        const mode = el.querySelector('input[name="ob-start-mode"]:checked')?.value;
+        if (pay > 0) State.setPayAmount(pay);
+        State.setFrequency(freq);
+        if (start) State.setPayStart(start);
+        if (mode === 'fresh') { State.bills = []; State.saveBills(); }
+        State.setOnboarded(true);
+        close();
+        navigate();
+      };
+    }
+  });
+}
 
 /* PWA service worker (only over http(s)) */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
