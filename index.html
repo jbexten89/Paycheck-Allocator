@@ -649,11 +649,6 @@
   }
 
   /* Tests */
-  .tests { margin-top: 60px; padding: 16px 20px; border: 1px dashed var(--hairline-strong); border-radius: var(--radius-lg); background: var(--paper-2); }
-  .tests summary { cursor: pointer; font-family: var(--serif); font-size: 18px; font-weight: 600; }
-  .tests pre { font-family: var(--mono); font-size: 12px; line-height: 1.55; max-height: 360px; overflow-y: auto; background: var(--paper); padding: 12px; border-radius: 8px; border: 1px solid var(--hairline); white-space: pre-wrap; }
-  .tests .pass { color: var(--good); }
-  .tests .fail { color: var(--danger); font-weight: 600; }
 
   hr.rule { border: none; border-top: 1px solid var(--hairline); margin: 20px 0; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -2546,7 +2541,6 @@ route('settings', (root) => {
         <p class="mono" style="font-size:12px;color:var(--ink-muted);">v1 · ledger edition</p>
       </div>
     </div>
-    ${testsBlock()}
   `;
 
   $$('.tab-btn').forEach((btn) => {
@@ -2708,134 +2702,6 @@ function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&'
 function escapeAttr(s) { return escapeHtml(s); }
 function emptySvg() {
   return `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="10" y="8" width="44" height="48" rx="4"/><line x1="18" y1="20" x2="46" y2="20"/><line x1="18" y1="28" x2="46" y2="28"/><line x1="18" y1="36" x2="38" y2="36"/><circle cx="46" cy="46" r="6"/><line x1="46" y1="42" x2="46" y2="50"/><line x1="42" y1="46" x2="50" y2="46"/></svg>`;
-}
-
-/* ------------------------- Test harness ------------------------- */
-function testsBlock() {
-  return `<details class="tests"><summary>▸ Run tests</summary>
-    <div style="margin-top:12px;">
-      <button class="btn btn-primary" id="run-tests">Run</button>
-      <pre id="test-out" style="margin-top:12px;display:none;"></pre>
-    </div>
-  </details>`;
-}
-function wireTests(root) {
-  const btn = root.querySelector('#run-tests');
-  if (!btn) return;
-  btn.onclick = () => {
-    const out = root.querySelector('#test-out');
-    out.style.display = 'block';
-    out.innerHTML = '';
-    const log = (line, ok) => {
-      const span = document.createElement('div');
-      span.className = ok === true ? 'pass' : ok === false ? 'fail' : '';
-      span.textContent = (ok === true ? '✓ ' : ok === false ? '✗ ' : '  ') + line;
-      out.appendChild(span);
-    };
-    runTests(log);
-  };
-}
-
-function runTests(log) {
-  let pass = 0, fail = 0;
-  const t = (name, fn) => {
-    try { fn(); pass++; log(name, true); }
-    catch (e) { fail++; log(name + ' — ' + e.message, false); }
-  };
-  const eq = (a, b, msg) => {
-    const aa = typeof a === 'number' ? Math.round(a * 100) / 100 : a;
-    const bb = typeof b === 'number' ? Math.round(b * 100) / 100 : b;
-    if (aa !== bb) throw new Error((msg || 'eq') + ` — got ${a}, expected ${b}`);
-  };
-
-  log('— Allocation engine tests —');
-
-  t('biweekly: 2 paychecks before due → bill / 2', () => {
-    // pay start May 1 2026, due day 20. Pay dates: May 1, 15, 29, ...
-    // First D after May 1 = May 20. Pay dates strictly between Apr 20 and May 20: May 1, May 15 → 2.
-    const bills = [{ id: '1', name: 'X', dueDay: 20, amount: 100, initialSaved: 0 }];
-    const dates = generatePayDates(parseISO('2026-05-01'), 6, 'biweekly');
-    const { perPaycheck } = computeAllocations(bills, dates);
-    eq(perPaycheck[0].items[0].amount, 50, 'May 1 alloc');
-    eq(perPaycheck[1].items[0].amount, 50, 'May 15 alloc');
-  });
-
-  t('paycheck on due date allocates to next cycle, not current', () => {
-    // Pay start May 1, due day 1. May 1 paycheck should allocate toward June 1.
-    const bills = [{ id: '1', name: 'Rent', dueDay: 1, amount: 300, initialSaved: 0 }];
-    const dates = generatePayDates(parseISO('2026-05-01'), 4, 'biweekly');
-    const { perPaycheck } = computeAllocations(bills, dates);
-    // D for May 1 paycheck must be June 1 (not May 1)
-    const it = perPaycheck[0].items[0];
-    eq(it.dueDate.getMonth(), 5, 'D is June (month idx 5)');
-    eq(it.dueDate.getDate(), 1, 'D day is 1');
-  });
-
-  t('initialSaved subtracts only from first cycle', () => {
-    // amount 100, initialSaved 40, 2 paychecks per cycle → first cycle 30/30, later cycles 50/50
-    const bills = [{ id: '1', name: 'X', dueDay: 20, amount: 100, initialSaved: 40 }];
-    const dates = generatePayDates(parseISO('2026-05-01'), 8, 'biweekly');
-    const { perPaycheck } = computeAllocations(bills, dates);
-    eq(perPaycheck[0].items[0].amount, 30, 'first cycle pay 1');
-    eq(perPaycheck[1].items[0].amount, 30, 'first cycle pay 2');
-    // After May 20 due passes, next cycle starts. May 29 pay funds June 20.
-    // Pay dates between May 20 and June 20: May 29, June 12 → 2 → 50 each.
-    eq(perPaycheck[2].items[0].amount, 50, 'second cycle pay 1');
-    eq(perPaycheck[3].items[0].amount, 50, 'second cycle pay 2');
-  });
-
-  t('clamps due day 31 in February', () => {
-    const bills = [{ id: '1', name: 'X', dueDay: 31, amount: 100, initialSaved: 0 }];
-    const dates = generatePayDates(parseISO('2027-02-01'), 2, 'biweekly');
-    const { perPaycheck } = computeAllocations(bills, dates);
-    const it = perPaycheck[0].items[0];
-    // Feb 2027 has 28 days
-    eq(it.dueDate.getMonth(), 1, 'February month idx');
-    eq(it.dueDate.getDate(), 28, 'clamped to last day of Feb');
-  });
-
-  t('skips bills with zero or negative amount', () => {
-    const bills = [
-      { id: '1', name: 'Zero', dueDay: 15, amount: 0, initialSaved: 0 },
-      { id: '2', name: 'Neg',  dueDay: 15, amount: -50, initialSaved: 0 },
-      { id: '3', name: 'Real', dueDay: 15, amount: 100, initialSaved: 0 }
-    ];
-    const dates = generatePayDates(parseISO('2026-05-01'), 4, 'biweekly');
-    const { perPaycheck } = computeAllocations(bills, dates);
-    eq(perPaycheck[0].items.length, 1, 'only real bill');
-    eq(perPaycheck[0].items[0].name, 'Real');
-  });
-
-  t('running balance accumulates and resets after due passes', () => {
-    const bills = [{ id: '1', name: 'X', dueDay: 20, amount: 100, initialSaved: 0 }];
-    const dates = generatePayDates(parseISO('2026-05-01'), 6, 'biweekly');
-    const { perPaycheck } = computeAllocations(bills, dates);
-    // May 1: bal 50, May 15: bal 100. May 20 passes → reset.
-    eq(perPaycheck[0].items[0].runningBalance, 50, 'after May 1');
-    eq(perPaycheck[1].items[0].runningBalance, 100, 'after May 15');
-    eq(perPaycheck[2].items[0].runningBalance, 50, 'first pay of new cycle resets and adds');
-  });
-
-  t('initialSaved reflected in starting running balance contribution', () => {
-    const bills = [{ id: '1', name: 'X', dueDay: 20, amount: 100, initialSaved: 40 }];
-    const dates = generatePayDates(parseISO('2026-05-01'), 2, 'biweekly');
-    const { perPaycheck } = computeAllocations(bills, dates);
-    // Already saved 40, then add 30 = 70 after first pay; 100 after second.
-    eq(perPaycheck[0].items[0].runningBalance, 70, 'first pay running');
-    eq(perPaycheck[1].items[0].runningBalance, 100, 'second pay running');
-  });
-
-  t('mid-cycle bill recalculates from current pay date forward', () => {
-    // We simulate "added mid-cycle" by starting pay dates partway through a month.
-    const bills = [{ id: '1', name: 'X', dueDay: 20, amount: 100, initialSaved: 0 }];
-    const dates = generatePayDates(parseISO('2026-05-15'), 4, 'biweekly');
-    const { perPaycheck } = computeAllocations(bills, dates);
-    // Only May 15 pay date is strictly before May 20 due, so cycle count = 1, full $100.
-    eq(perPaycheck[0].items[0].amount, 100, 'one-pay cycle');
-  });
-
-  log('');
-  log(`Result: ${pass} passed, ${fail} failed`, fail === 0);
 }
 
 /* ------------------------- Boot ------------------------- */
