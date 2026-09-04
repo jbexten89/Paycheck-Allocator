@@ -190,6 +190,14 @@
     border-bottom: 1px solid var(--hairline);
     overflow-x: auto;
     scrollbar-width: none;
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 30;
+    background: var(--paper);
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
   }
   .settings-tabs::-webkit-scrollbar { display: none; }
   .tab-btn {
