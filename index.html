@@ -183,6 +183,31 @@
     min-width: 0;
   }
   .view-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; }
+  .settings-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: var(--gap);
+    border-bottom: 1px solid var(--hairline);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .settings-tabs::-webkit-scrollbar { display: none; }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    padding: 10px 16px;
+    color: var(--ink-muted);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: var(--ink); }
+  .tab-btn.active { color: var(--amber); border-bottom-color: var(--amber); }
+  .settings-section { display: none; }
+  .settings-section.active { display: grid; }
   .view-header .sub { color: var(--ink-muted); font-size: 13px; }
 
   .view { animation: fade 200ms ease; }
@@ -2354,14 +2379,24 @@ route('schedule', (root) => {
 });
 
 route('settings', (root) => {
+  const activeTab = sessionStorage.getItem('settings.tab') || 'general';
   root.innerHTML = `
     <div class="view-header">
       <div>
         <h1>Settings</h1>
-        <div class="sub">Pay schedule, theme, and data management.</div>
+        <div class="sub">Pay schedule, rules, sync, and data.</div>
       </div>
     </div>
-    <div class="grid grid-2">
+    <div class="settings-tabs">
+      ${[
+        ['general', 'General'],
+        ['rules',   'Rules'],
+        ['sync',    'Sync'],
+        ['data',    'Data']
+      ].map(([k, l]) => `<button class="tab-btn${k === activeTab ? ' active' : ''}" data-tab="${k}">${l}</button>`).join('')}
+    </div>
+
+    <div class="settings-section${activeTab === 'general' ? ' active' : ''} grid grid-2" data-tab="general">
       <div class="card">
         <h2>Pay schedule</h2>
         <label>Pay start date</label>
@@ -2399,43 +2434,56 @@ route('settings', (root) => {
           <input id="show-zero" type="checkbox" ${State.showZeroBills ? 'checked' : ''} style="width:auto;" />
           <label for="show-zero" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show $0 bills on dashboard (grayed)</label>
         </div>
-        <div style="margin-top:14px;">
-          <label style="text-transform:uppercase; letter-spacing:0.08em; font-size:11px; color:var(--ink-muted); margin-bottom:6px; display:block;">Payment shape (per category):</label>
-          ${(() => {
-            const present = State.orderedCategories().filter((c) => c !== 'Uncategorized');
-            const flagged = Object.keys(State.catShape || {});
-            const seen = new Set();
-            const list = [];
-            for (const c of present) { const k = c.toLowerCase(); if (!seen.has(k)) { seen.add(k); list.push(c); } }
-            for (const k of flagged) { if (!seen.has(k)) { seen.add(k); list.push(k.replace(/\b\w/g, (m) => m.toUpperCase())); } }
-            if (!list.length) return `<div class="hint" style="font-size:12px;">Add bills with categories to configure this.</div>`;
-            const shapes = [
-              ['spread',             'Spread evenly'],
-              ['single-cycle',       'Once per cycle (last pay)'],
-              ['first-two-of-three', 'First-two-of-three'],
-              ['monthly-rate',       'Monthly rate, first pay of month']
-            ];
-            return list.map((cat) => `
-              <div style="margin-top:6px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <span style="font-size:13px; color:var(--ink); min-width:110px;">${escapeHtml(cat)}</span>
-                <select class="cat-shape" data-cat="${escapeAttr(cat)}" style="width:auto; max-width:220px;">
-                  ${shapes.map(([v, l]) => `<option value="${v}" ${State.getCatShape(cat) === v ? 'selected' : ''}>${l}</option>`).join('')}
-                </select>
-              </div>
-            `).join('');
-          })()}
+      </div>
+    </div>
+
+    <div class="settings-section${activeTab === 'rules' ? ' active' : ''} grid grid-2" data-tab="rules">
+      <div class="card">
+        <h2>Payment shape</h2>
+        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">How each category's bills are spread across paychecks in a cycle.</div>
+        ${(() => {
+          const present = State.orderedCategories().filter((c) => c !== 'Uncategorized');
+          const flagged = Object.keys(State.catShape || {});
+          const seen = new Set();
+          const list = [];
+          for (const c of present) { const k = c.toLowerCase(); if (!seen.has(k)) { seen.add(k); list.push(c); } }
+          for (const k of flagged) { if (!seen.has(k)) { seen.add(k); list.push(k.replace(/\b\w/g, (m) => m.toUpperCase())); } }
+          if (!list.length) return `<div class="hint" style="font-size:12px;">Add bills with categories to configure this.</div>`;
+          const shapes = [
+            ['spread',             'Spread evenly'],
+            ['single-cycle',       'Once per cycle (last pay)'],
+            ['first-two-of-three', 'First-two-of-three'],
+            ['monthly-rate',       'Monthly rate, first pay of month']
+          ];
+          return list.map((cat) => `
+            <div style="margin-top:6px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <span style="font-size:13px; color:var(--ink); min-width:110px;">${escapeHtml(cat)}</span>
+              <select class="cat-shape" data-cat="${escapeAttr(cat)}" style="width:auto; max-width:220px;">
+                ${shapes.map(([v, l]) => `<option value="${v}" ${State.getCatShape(cat) === v ? 'selected' : ''}>${l}</option>`).join('')}
+              </select>
+            </div>
+          `).join('');
+        })()}
+        <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--hairline);">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <input id="single-small" type="checkbox" ${State.singleSmallMonthly ? 'checked' : ''} style="width:auto;" />
+            <label for="single-small" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">"Spread evenly" fallback: monthly bills under</label>
+            <input id="single-small-threshold" type="number" min="1" step="1" value="${State.singleSmallThreshold}" style="width:80px;" />
+            <label style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">take from last pay only</label>
+          </div>
         </div>
-        <div style="margin-top:14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-          <input id="single-small" type="checkbox" ${State.singleSmallMonthly ? 'checked' : ''} style="width:auto;" />
-          <label for="single-small" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">"Spread evenly" fallback: monthly bills under</label>
-          <input id="single-small-threshold" type="number" min="1" step="1" value="${State.singleSmallThreshold}" style="width:80px;" />
-          <label style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">take from last pay only</label>
-        </div>
-        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+      </div>
+      <div class="card">
+        <h2>Cell credit</h2>
+        <div style="display:flex; align-items:center; gap:10px;">
           <input id="cell-credit-enable" type="checkbox" ${State.cellCreditEnabled ? 'checked' : ''} style="width:auto;" />
           <label for="cell-credit-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Enable inline monthly credit on the Cell bill (Dashboard)</label>
         </div>
+        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-top:8px;">When on, each Cell row on the Dashboard shows a small credit input that reduces that month's Cell amount.</div>
       </div>
+    </div>
+
+    <div class="settings-section${activeTab === 'sync' ? ' active' : ''} grid grid-2" data-tab="sync">
       <div class="card">
         <h2>Sync (cloud backup)</h2>
         ${
@@ -2458,6 +2506,9 @@ route('settings', (root) => {
           Status: <span id="sync-status">${Sync.status}${Sync.lastError ? ` (${escapeHtml(Sync.lastError)})` : ''}</span>
         </div>
       </div>
+    </div>
+
+    <div class="settings-section${activeTab === 'data' ? ' active' : ''} grid grid-2" data-tab="data">
       <div class="card">
         <h2>Data</h2>
         <div class="row">
@@ -2489,6 +2540,15 @@ route('settings', (root) => {
     </div>
     ${testsBlock()}
   `;
+
+  $$('.tab-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const tab = btn.dataset.tab;
+      sessionStorage.setItem('settings.tab', tab);
+      $$('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+      $$('.settings-section').forEach((s) => s.classList.toggle('active', s.dataset.tab === tab));
+    };
+  });
 
   $('#pay-start').onchange = (e) => { State.setPayStart(e.target.value); };
   $('#freq').onchange = (e) => { State.setFrequency(e.target.value); };
