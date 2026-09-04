@@ -2395,7 +2395,8 @@ route('settings', (root) => {
         ['general', 'General'],
         ['rules',   'Rules'],
         ['sync',    'Sync'],
-        ['data',    'Data']
+        ['data',    'Data'],
+        ['help',    'Help']
       ].map(([k, l]) => `<button class="tab-btn${k === activeTab ? ' active' : ''}" data-tab="${k}">${l}</button>`).join('')}
     </div>
 
@@ -2539,6 +2540,75 @@ route('settings', (root) => {
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
         <p class="mono" style="font-size:12px;color:var(--ink-muted);">v1 · ledger edition</p>
+      </div>
+    </div>
+
+    <div class="settings-section${activeTab === 'help' ? ' active' : ''} grid grid-2" data-tab="help">
+      <div class="card">
+        <h2>Getting started</h2>
+        <ol style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li>Set your <strong>Pay start date</strong>, <strong>Frequency</strong>, and <strong>Paycheck amount</strong> in <em>General</em>.</li>
+          <li>Go to <strong>Bills</strong> and add or edit bills — or load a sample set from <em>Data → Load template</em>.</li>
+          <li>Open <strong>Dashboard</strong> to see how much to set aside from your next paycheck, and the monthly leftover forecast.</li>
+          <li>Open <strong>Schedule</strong> for the full grid of bills across future paychecks.</li>
+          <li>Optionally sign in under <em>Sync</em> to back up and sync across devices.</li>
+        </ol>
+      </div>
+      <div class="card">
+        <h2>How allocations work</h2>
+        <p style="color:var(--ink-soft);">For each bill, the app finds the next due date after each paycheck and spreads the bill's amount across all paychecks that fall in that cycle. A paycheck landing on the due date funds the <em>next</em> cycle since the money can't clear in time.</p>
+        <p style="color:var(--ink-soft);"><strong>Already saved</strong> reduces the first upcoming cycle only. Later cycles use the full amount.</p>
+      </div>
+      <div class="card">
+        <h2>Payment shape (Rules tab)</h2>
+        <p style="color:var(--ink-soft); margin-bottom:6px;">Choose how each category's bills spread across paychecks in a cycle:</p>
+        <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li><strong>Spread evenly</strong> — bill / number of paychecks in the cycle. Default.</li>
+          <li><strong>Once per cycle (last pay)</strong> — full amount on the last paycheck before due.</li>
+          <li><strong>First-two-of-three</strong> — for 3-pay cycles only: 50/50 on the first two, $0 on the last.</li>
+          <li><strong>Monthly rate, first pay of month</strong> — monthly-equivalent lump sum on the first paycheck of each calendar month.</li>
+        </ul>
+        <p style="color:var(--ink-soft); margin-top:8px; font-size:13px;">The <em>"Spread evenly" fallback</em> only affects categories set to Spread — under-threshold monthly bills concentrate onto the last pay.</p>
+      </div>
+      <div class="card">
+        <h2>Bills page</h2>
+        <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li>Tap a bill row to edit it.</li>
+          <li>Tap a category header to collapse / expand.</li>
+          <li>Drag the ⋮⋮ handle on a row or header to reorder within a category (or reorder categories).</li>
+          <li>Tap the ✕ on a category header to delete the category and all its bills.</li>
+          <li>Use <strong>Show archived</strong> to see bills you've archived.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>Dashboard</h2>
+        <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li>Use ‹ › to walk forward and back through pay periods. <strong>today</strong> returns to the current one.</li>
+          <li>Green cash-flow bars = safely under paycheck; red = over.</li>
+          <li>Monthly leftover shows net (paycheck − set aside) per calendar month. Red = the month goes short.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>Sync & backup</h2>
+        <p style="color:var(--ink-soft);">Sign in with email + password under the <em>Sync</em> tab. Sign-in happens inside the app (works on iOS home-screen installs). Changes push to Supabase automatically after ~1s. Sign in on another device with the same account to pull your data.</p>
+        <p style="color:var(--ink-soft); font-size:13px;">Regular <em>Data → Export JSON</em> gives a manual backup file.</p>
+      </div>
+      <div class="card">
+        <h2>Tips</h2>
+        <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li>Set <strong>Show $0 bills on dashboard (grayed)</strong> to see the full bill list even when nothing's allocated that pay.</li>
+          <li>Use per-month <strong>Cell credit</strong> on the Dashboard to reduce Cell's amount for a specific month (e.g. autopay discount).</li>
+          <li>Reorder pay periods with the Schedule view size in <em>General</em>: 6 / 12 / 18 / 26.</li>
+          <li>Reset category drag-order with <em>Data → Reset category order</em>.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>Troubleshooting</h2>
+        <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li><strong>Iphone home-screen app looks stale after an update:</strong> close the app card in the app switcher, reopen. The service worker will fetch the newest HTML.</li>
+          <li><strong>Sync stuck:</strong> tap <em>Sync now</em>; if that fails, check the status line and your connection.</li>
+          <li><strong>Deleted the wrong bill:</strong> if you have sync on, sign in on another device that hasn't synced yet, Export JSON, then Import back.</li>
+        </ul>
       </div>
     </div>
   `;
