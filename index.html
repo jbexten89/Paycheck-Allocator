@@ -1823,7 +1823,6 @@ route('bills', (root) => {
       </div>
       <div class="row" style="gap:8px;">
         <button class="btn" id="toggle-archived">${sessionStorage.getItem('bills.showArch') === '1' ? 'Hide archived' : 'Show archived'}</button>
-        <button class="btn btn-primary" id="add-bill">+ Add bill</button>
       </div>
     </div>
     ${
@@ -1877,7 +1876,8 @@ route('bills', (root) => {
         })()
     }
   `;
-  $('#add-bill').onclick = () => openBillEditor(null);
+  const addBillBtn = $('#add-bill');
+  if (addBillBtn) addBillBtn.onclick = () => openBillEditor(null);
   const toggleArchBtn = $('#toggle-archived');
   if (toggleArchBtn) toggleArchBtn.onclick = () => {
     const now = sessionStorage.getItem('bills.showArch') === '1';
