@@ -1507,6 +1507,26 @@ const Sync = {
       State.catShape = { ...p.catShape };
       localStorage.setItem(STORE.catShape, JSON.stringify(State.catShape));
     }
+    // Legacy payload compatibility: if the cloud row predates multi-income (no `incomes` field)
+    // but carries the legacy pay singletons, rebuild incomes[0] from them so the timeline uses cloud values.
+    if (!Array.isArray(p.incomes)) {
+      const hasLegacy =
+        typeof p.payAmount === 'number' ||
+        typeof p.payStart === 'string' ||
+        typeof p.frequency === 'string';
+      if (hasLegacy) {
+        const primary = State.incomes[0] || {
+          id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+          name: 'Paycheck'
+        };
+        if (typeof p.payAmount === 'number') primary.amount = Number(p.payAmount) || 0;
+        if (typeof p.frequency === 'string') primary.frequency = p.frequency;
+        if (typeof p.payStart === 'string' && p.payStart) primary.payStart = p.payStart;
+        if (State.incomes.length === 0) State.incomes.push(primary);
+        else State.incomes[0] = primary;
+        State.saveIncomes();
+      }
+    }
     localStorage.setItem(STORE.seeded, '1');
   },
 
