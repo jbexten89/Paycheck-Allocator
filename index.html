@@ -1895,7 +1895,7 @@ route('dashboard', (root) => {
                       cellExtra = ` <input class="cell-credit-input" type="number" step="0.01" min="0" placeholder="credit" value="${cred}" data-mkey="${mKey}" />`;
                     }
                     const billObj = State.bills.find((x) => x.id === it.billId);
-                    const dueInfo = (State.dueSoonEnabled && billObj && !billObj.archived && Number(billObj.amount) > 0) ? dueSoonInfoFor(billObj) : null;
+                    const dueInfo = (State.dueSoonEnabled && billObj && !billObj.archived && Number(billObj.amount) > 0 && (!billObj.recurrence || billObj.recurrence === 'monthly')) ? dueSoonInfoFor(billObj) : null;
                     const classes = [];
                     if (it.amount === 0) classes.push('row-muted');
                     if (dueInfo && dueInfo.soon) classes.push('due-soon');
@@ -2017,7 +2017,7 @@ route('bills', (root) => {
                 </div>
                 <div class="bill-list" role="list">
                   ${bills.map((b) => {
-                    const dueInfo = (State.dueSoonEnabled && !b.archived && Number(b.amount) > 0) ? dueSoonInfoFor(b) : null;
+                    const dueInfo = (State.dueSoonEnabled && !b.archived && Number(b.amount) > 0 && (!b.recurrence || b.recurrence === 'monthly')) ? dueSoonInfoFor(b) : null;
                     const soon = dueInfo && dueInfo.soon;
                     return `
                     <div class="bill-row${b.archived ? ' bill-archived' : ''}${soon ? ' due-soon' : ''}" role="listitem" data-id="${b.id}" tabindex="0">
