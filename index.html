@@ -737,7 +737,8 @@ const STORE = {
   leftoverMonths: 'paycheck_allocator.leftover_months',
   batchMonthlyCats: 'paycheck_allocator.batch_monthly_cats',
   catShape: 'paycheck_allocator.cat_shape',
-  onboarded: 'paycheck_allocator.onboarded'
+  onboarded: 'paycheck_allocator.onboarded',
+  incomes: 'paycheck_allocator.incomes'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1185,6 +1186,19 @@ const State = {
     try { this.catShape = JSON.parse(localStorage.getItem(STORE.catShape) || '{}') || {}; }
     catch { this.catShape = {}; }
     this.onboarded = localStorage.getItem(STORE.onboarded) === '1';
+    try { this.incomes = JSON.parse(localStorage.getItem(STORE.incomes) || '[]') || []; }
+    catch { this.incomes = []; }
+    // Migrate single-paycheck settings into an incomes array (first-run only)
+    if (!this.incomes.length && (this.payAmount > 0 || this.payStart)) {
+      this.incomes = [{
+        id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+        name: 'Paycheck',
+        amount: Number(this.payAmount) || 0,
+        frequency: this.frequency || 'biweekly',
+        payStart: this.payStart || '2026-05-01'
+      }];
+      localStorage.setItem(STORE.incomes, JSON.stringify(this.incomes));
+    }
     // One-time migration from legacy singlePayCats + batchMonthlyCats sets
     if (!localStorage.getItem(STORE.catShape)) {
       for (const k of this.singlePayCats) if (!this.catShape[k]) this.catShape[k] = 'single-cycle';
@@ -1247,6 +1261,68 @@ const State = {
   },
   getCatShape(cat) { return this.catShape[(cat || '').toLowerCase()] || 'spread'; },
   setOnboarded(v) { this.onboarded = !!v; localStorage.setItem(STORE.onboarded, v ? '1' : '0'); },
+  saveIncomes() {
+    localStorage.setItem(STORE.incomes, JSON.stringify(this.incomes));
+    // Keep legacy singletons roughly in sync with the primary income for old code paths
+    const primary = this.incomes[0];
+    if (primary) {
+      this.payAmount = Number(primary.amount) || 0;
+      this.frequency = primary.frequency || 'biweekly';
+      this.payStart = primary.payStart || this.payStart;
+      localStorage.setItem(STORE.payAmount, String(this.payAmount));
+      localStorage.setItem(STORE.freq, this.frequency);
+      localStorage.setItem(STORE.payStart, this.payStart);
+    }
+  },
+  addIncome(inc) {
+    const item = {
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now() + Math.random()),
+      name: (inc.name || 'Income').toString(),
+      amount: Number(inc.amount) || 0,
+      frequency: inc.frequency || 'biweekly',
+      payStart: inc.payStart || toISO(new Date())
+    };
+    this.incomes.push(item);
+    this.saveIncomes();
+  },
+  updateIncome(id, patch) {
+    const i = this.incomes.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    this.incomes[i] = { ...this.incomes[i], ...patch };
+    this.saveIncomes();
+  },
+  removeIncome(id) {
+    this.incomes = this.incomes.filter((x) => x.id !== id);
+    this.saveIncomes();
+  },
+  // Merged pay-date timeline across all income sources.
+  mergedPayTimeline(count = 156) {
+    const list = (this.incomes && this.incomes.length)
+      ? this.incomes
+      : [{ id: 'primary', name: 'Paycheck', amount: this.payAmount, frequency: this.frequency, payStart: this.payStart }];
+    const byDay = new Map();
+    for (const inc of list) {
+      if (!inc.payStart) continue;
+      const dates = generatePayDates(parseISO(inc.payStart), Math.max(count, 200), inc.frequency);
+      for (const d of dates) {
+        const key = toISO(d);
+        if (!byDay.has(key)) byDay.set(key, { payDate: d, amount: 0, sources: [] });
+        const grp = byDay.get(key);
+        grp.amount += Number(inc.amount) || 0;
+        grp.sources.push({ name: inc.name, amount: Number(inc.amount) || 0 });
+      }
+    }
+    return [...byDay.values()].sort((a, b) => a.payDate - b.payDate).slice(0, count);
+  },
+  // Per-pay-date income lookup (for a specific Date).
+  incomeAtPayDate(date) {
+    if (!date) return 0;
+    const key = toISO(date);
+    for (const t of this.mergedPayTimeline(300)) {
+      if (toISO(t.payDate) === key) return t.amount;
+    }
+    return 0;
+  },
   toggleSinglePayCat(cat, on) {
     const key = cat.toLowerCase();
     if (on) this.singlePayCats.add(key); else this.singlePayCats.delete(key);
@@ -1337,6 +1413,10 @@ const State = {
     this.saveBills();
   },
   paySchedule(count = 26) {
+    // Use merged multi-income timeline; if none configured yet fall back to legacy singleton
+    if (this.incomes && this.incomes.length) {
+      return this.mergedPayTimeline(count).map((t) => t.payDate);
+    }
     return generatePayDates(parseISO(this.payStart), count, this.frequency);
   }
 };
@@ -1362,6 +1442,7 @@ const Sync = {
       billOrder: State.billOrder,
       schedCount: State.schedCount,
       payAmount: State.payAmount,
+      incomes: State.incomes,
       collapsedCats: [...State.collapsedCats],
       showZeroBills: State.showZeroBills,
       skipLastOfThree: State.skipLastOfThree,
@@ -1387,6 +1468,7 @@ const Sync = {
     if (Array.isArray(p.billOrder)) { State.setBillOrder(p.billOrder); }
     if (typeof p.schedCount === 'number') { State.setSchedCount(p.schedCount); }
     if (typeof p.payAmount === 'number') { State.setPayAmount(p.payAmount); }
+    if (Array.isArray(p.incomes)) { State.incomes = p.incomes; State.saveIncomes(); }
     if (Array.isArray(p.collapsedCats)) { State.collapsedCats = new Set(p.collapsedCats); State.persistCollapsed(); }
     if (typeof p.showZeroBills === 'boolean') { State.setShowZeroBills(p.showZeroBills); }
     if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
@@ -1548,8 +1630,14 @@ function confirmDialog(message, onYes) {
 route('dashboard', (root) => {
   let offset = 0;
   const render = () => {
-  // Forward-only from payStart to match Pay Schedule cycle counts.
-  const payDates = generatePayDates(parseISO(State.payStart), 156, State.frequency);
+  // Merged multi-income timeline (with per-pay amounts) drives the dashboard.
+  const timeline = State.mergedPayTimeline(156);
+  const payDates = timeline.map((t) => t.payDate);
+  const payAmountAt = (d) => {
+    const key = toISO(d);
+    const t = timeline.find((x) => toISO(x.payDate) === key);
+    return t ? t.amount : 0;
+  };
   const { perPaycheck } = computeAllocations(State.bills, payDates);
   const today = new Date(); today.setHours(0,0,0,0);
   let nextIdx = perPaycheck.findIndex((p) => p.payDate >= today);
@@ -1576,22 +1664,29 @@ route('dashboard', (root) => {
     ${
       avgWindow.length > 1
         ? (() => {
-            const maxVal = Math.max(...avgWindow.map((p) => p.total), State.payAmount || 0, 1);
+            const maxVal = Math.max(...avgWindow.map((p) => Math.max(p.total, payAmountAt(p.payDate))), 1);
             const w = 100 / avgWindow.length;
             const selectedInWindow = targetIdx - nextIdx;
             const bars = avgWindow.map((p, i) => {
               const h = (p.total / maxVal) * 100;
-              const over = State.payAmount > 0 && p.total > State.payAmount;
+              const inc = payAmountAt(p.payDate);
+              const over = inc > 0 && p.total > inc;
               const sel = i === selectedInWindow;
               const barX = i*w + w*0.14;
               const barW = w*0.72;
               const fill = over ? 'var(--danger)' : (sel ? 'var(--good)' : 'var(--amber)');
               const stroke = sel ? 'var(--ink)' : 'none';
-              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="1.5" rx="1"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: ${fmtUSD.format(p.total)}</title></rect>`;
+              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="1.5" rx="1"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: set aside ${fmtUSD.format(p.total)} / income ${fmtUSD.format(inc)}</title></rect>`;
             }).join('');
-            const payLine = State.payAmount > 0 && State.payAmount <= maxVal
-              ? `<line x1="0" x2="100%" y1="${((1 - State.payAmount / maxVal) * 100).toFixed(3)}%" y2="${((1 - State.payAmount / maxVal) * 100).toFixed(3)}%" stroke="var(--ink-muted)" stroke-dasharray="2,3" stroke-width="1" opacity="0.7"/>`
-              : '';
+            // Per-bar income tick marks (small horizontal line at income level)
+            const payLine = avgWindow.map((p, i) => {
+              const inc = payAmountAt(p.payDate);
+              if (inc <= 0) return '';
+              const yPct = ((1 - inc / maxVal) * 100).toFixed(3);
+              const x1 = (i * w + w * 0.14).toFixed(3);
+              const x2 = (i * w + w * 0.86).toFixed(3);
+              return `<line x1="${x1}%" x2="${x2}%" y1="${yPct}%" y2="${yPct}%" stroke="var(--ink-muted)" stroke-dasharray="2,2" stroke-width="1" opacity="0.6"/>`;
+            }).join('');
             const step = avgWindow.length > 20 ? 4 : (avgWindow.length > 10 ? 2 : 1);
             const labels = avgWindow.map((p, i) => {
               if (i !== 0 && i !== avgWindow.length - 1 && ((i + 1) % step !== 0)) return '';
@@ -1608,7 +1703,7 @@ route('dashboard', (root) => {
                   <svg width="100%" height="100%" style="display:block; overflow:visible;">${labels}</svg>
                 </div>
                 ${(() => {
-                  const overCount = avgWindow.filter((p) => State.payAmount > 0 && p.total > State.payAmount).length;
+                  const overCount = avgWindow.filter((p) => { const inc = payAmountAt(p.payDate); return inc > 0 && p.total > inc; }).length;
                   return overCount > 0
                     ? `<div class="hint" style="margin-top:6px; font-size:11px; color:var(--danger); line-height:1.3;">${overCount} pay${overCount === 1 ? '' : 's'} exceed paycheck</div>`
                     : '';
@@ -1638,19 +1733,21 @@ route('dashboard', (root) => {
         <div class="label">${offset === 0 ? 'Set aside next pay' : 'Set aside this pay'}</div>
         <div class="value amber">${fmtUSD.format(next ? next.total : 0)}</div>
         ${
-          State.payAmount > 0 && next
+          next && payAmountAt(next.payDate) > 0
             ? (() => {
-                const pct = Math.max(0, Math.min(1, next.total / State.payAmount));
-                const over = next.total > State.payAmount;
+                const inc = payAmountAt(next.payDate);
+                const pct = Math.max(0, Math.min(1, next.total / inc));
+                const over = next.total > inc;
                 return `<div class="setaside-bar" aria-label="${Math.round(pct*100)}% of paycheck"><div class="setaside-bar-fill${over ? ' over' : ''}" style="width:${(pct*100).toFixed(1)}%"></div></div>`;
               })()
             : ''
         }
         <div class="hint">${
-          State.payAmount > 0 && next
+          next && payAmountAt(next.payDate) > 0
             ? (() => {
-                const over = next.total > State.payAmount;
-                const diff = over ? next.total - State.payAmount : State.payAmount - next.total;
+                const inc = payAmountAt(next.payDate);
+                const over = next.total > inc;
+                const diff = over ? next.total - inc : inc - next.total;
                 return `<span class="leftover-amount${over ? ' short' : ''}">${fmtUSD.format(diff)}</span> ${over ? 'short' : 'leftover'}`;
               })()
             : `across ${next ? next.items.length : 0} bill${next && next.items.length === 1 ? '' : 's'}`
@@ -1664,7 +1761,7 @@ route('dashboard', (root) => {
           <button class="pay-arrow" id="pay-back" aria-label="Previous pay period" ${canBack ? '' : 'disabled'}>‹</button>
           <button class="pay-arrow" id="pay-fwd" aria-label="Next pay period" ${canFwd ? '' : 'disabled'}>›</button>
         </div>
-        <div class="hint">${State.payAmount > 0 ? fmtUSD.format(State.payAmount) : ''}</div>
+        <div class="hint">${next && payAmountAt(next.payDate) > 0 ? fmtUSD.format(payAmountAt(next.payDate)) : ''}</div>
         ${
           perPaycheck[targetIdx + 1]
             ? `<div class="pay-after">then ${fmtDateShort.format(perPaycheck[targetIdx + 1].payDate)}</div>`
@@ -1675,7 +1772,7 @@ route('dashboard', (root) => {
     </div>
 
     ${
-      State.payAmount > 0
+      (State.incomes && State.incomes.some((i) => Number(i.amount) > 0))
         ? (() => {
             const monthsToShow = State.leftoverMonths;
             const spanCount = monthsToShow >= 12 ? 52 : 26;
@@ -1687,7 +1784,7 @@ route('dashboard', (root) => {
               const key = p.payDate.getFullYear() + '-' + String(p.payDate.getMonth() + 1).padStart(2, '0');
               const label = p.payDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
               const cur = byMonth.get(key) || { label, leftover: 0, pays: 0 };
-              cur.leftover += (State.payAmount - p.total);
+              cur.leftover += (payAmountAt(p.payDate) - p.total);
               cur.pays += 1;
               byMonth.set(key, cur);
             }
@@ -2235,7 +2332,13 @@ function openBillEditor(id) {
 route('schedule', (root) => {
   const render = () => {
     const count = State.schedCount;
-    const payDates = State.paySchedule(count);
+    const timeline = State.mergedPayTimeline(count);
+    const payDates = timeline.map((t) => t.payDate);
+    const payAmountAt = (d) => {
+      const key = toISO(d);
+      const t = timeline.find((x) => toISO(x.payDate) === key);
+      return t ? t.amount : 0;
+    };
     const { perPaycheck } = computeAllocations(State.bills, payDates);
     const activeBills = State.bills.filter((b) => b.amount > 0);
     const billOrder = activeBills.slice().sort((a,b)=>a.dueDay-b.dueDay);
@@ -2332,8 +2435,9 @@ route('schedule', (root) => {
                 <tr class="sched-grand-total">
                   <td>Total</td>
                   ${perPaycheck.map((p) => {
-                    const over = State.payAmount > 0 && p.total > State.payAmount;
-                    return `<td class="total${over ? ' over-pay' : ''}"${over ? ` title="Exceeds $${State.payAmount.toFixed(2)} paycheck"` : ''}>${fmtUSD.format(p.total)}</td>`;
+                    const inc = payAmountAt(p.payDate);
+                    const over = inc > 0 && p.total > inc;
+                    return `<td class="total${over ? ' over-pay' : ''}"${over ? ` title="Exceeds ${fmtUSD.format(inc)} paycheck"` : ''}>${fmtUSD.format(p.total)}</td>`;
                   }).join('')}
                   <td class="total">${fmtUSD.format(perPaycheck.reduce((s,p)=>s+p.total,0))}</td>
                 </tr>
@@ -2410,30 +2514,50 @@ route('settings', (root) => {
 
     <div class="settings-section${activeTab === 'general' ? ' active' : ''} grid grid-2" data-tab="general">
       <div class="card">
-        <h2>Pay schedule</h2>
-        <label>Pay start date</label>
-        <input type="date" id="pay-start" value="${State.payStart}" />
-        <div style="margin-top:14px;">
-          <label>Frequency</label>
-          <select id="freq">
-            ${['biweekly','weekly','semi-monthly','monthly'].map((f) => `<option value="${f}" ${f===State.frequency?'selected':''}>${f}</option>`).join('')}
-          </select>
+        <h2>Income sources</h2>
+        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">Add each paycheck: yours, a spouse's, side gigs. Dashboard totals across them all.</div>
+        <div id="incomes-list" style="display:flex; flex-direction:column; gap:10px;">
+          ${(State.incomes || []).map((inc) => `
+            <div class="income-row" data-id="${inc.id}" style="border:1px solid var(--line); border-radius:10px; padding:10px; display:grid; grid-template-columns: 1fr auto; gap:8px;">
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                <div style="grid-column: span 2;">
+                  <label style="font-size:11px;">Name</label>
+                  <input data-f="name" type="text" value="${escapeHtml(inc.name || '')}" placeholder="e.g. Paycheck" />
+                </div>
+                <div>
+                  <label style="font-size:11px;">Amount (net)</label>
+                  <input data-f="amount" type="number" min="0" step="0.01" value="${inc.amount || ''}" placeholder="e.g. 2500" />
+                </div>
+                <div>
+                  <label style="font-size:11px;">Frequency</label>
+                  <select data-f="frequency">
+                    ${['biweekly','weekly','semi-monthly','monthly'].map((f) => `<option value="${f}" ${f === inc.frequency ? 'selected' : ''}>${f}</option>`).join('')}
+                  </select>
+                </div>
+                <div style="grid-column: span 2;">
+                  <label style="font-size:11px;">Next / last payday</label>
+                  <input data-f="payStart" type="date" value="${inc.payStart || ''}" />
+                </div>
+              </div>
+              <button class="btn btn-ghost" data-x="remove" aria-label="Remove income" title="Remove" style="align-self:start;">✕</button>
+            </div>
+          `).join('')}
         </div>
-        <div style="margin-top:14px;">
-          <label>Schedule view (pay periods)</label>
-          <select id="sched-count">
-            ${[6,12,18,26].map((n) => `<option value="${n}" ${n===State.schedCount?'selected':''}>${n}</option>`).join('')}
-          </select>
+        <div style="margin-top:10px;">
+          <button class="btn" id="add-income">+ Add income source</button>
         </div>
+      </div>
+      <div class="card">
+        <h2>Views</h2>
+        <label>Schedule view (pay periods)</label>
+        <select id="sched-count">
+          ${[6,12,18,26].map((n) => `<option value="${n}" ${n===State.schedCount?'selected':''}>${n}</option>`).join('')}
+        </select>
         <div style="margin-top:14px;">
           <label>Monthly leftover view (months)</label>
           <select id="leftover-months">
             ${[6,12].map((n) => `<option value="${n}" ${n===State.leftoverMonths?'selected':''}>${n}</option>`).join('')}
           </select>
-        </div>
-        <div style="margin-top:14px;">
-          <label>Paycheck amount (net)</label>
-          <input id="pay-amount" type="number" min="0" step="0.01" value="${State.payAmount || ''}" placeholder="e.g. 2500" />
         </div>
       </div>
       <div class="card">
@@ -2621,11 +2745,44 @@ route('settings', (root) => {
     };
   });
 
-  $('#pay-start').onchange = (e) => { State.setPayStart(e.target.value); };
-  $('#freq').onchange = (e) => { State.setFrequency(e.target.value); };
   $('#sched-count').onchange = (e) => { State.setSchedCount(parseInt(e.target.value, 10)); };
   $('#leftover-months').onchange = (e) => { State.setLeftoverMonths(parseInt(e.target.value, 10)); };
-  $('#pay-amount').onchange = (e) => { State.setPayAmount(parseFloat(e.target.value) || 0); };
+  const addIncomeBtn = $('#add-income');
+  if (addIncomeBtn) addIncomeBtn.onclick = () => {
+    State.addIncome({
+      name: 'Paycheck',
+      amount: 0,
+      frequency: 'biweekly',
+      payStart: State.payStart || toISO(new Date())
+    });
+    render();
+  };
+  $$('#incomes-list .income-row').forEach((row) => {
+    const id = row.dataset.id;
+    row.querySelectorAll('[data-f]').forEach((inp) => {
+      inp.onchange = () => {
+        const field = inp.dataset.f;
+        let val = inp.value;
+        if (field === 'amount') val = parseFloat(val) || 0;
+        const patch = { [field]: val };
+        State.updateIncome(id, patch);
+        // Keep legacy fields in sync from the FIRST income so old code still works
+        const incs = State.incomes;
+        if (incs && incs[0]) {
+          if (field === 'amount' && incs[0].id === id) State.setPayAmount(Number(val) || 0);
+          if (field === 'frequency' && incs[0].id === id) State.setFrequency(val);
+          if (field === 'payStart' && incs[0].id === id && val) State.setPayStart(val);
+        }
+      };
+    });
+    const rm = row.querySelector('[data-x="remove"]');
+    if (rm) rm.onclick = () => {
+      if ((State.incomes || []).length <= 1) { alert('Keep at least one income source.'); return; }
+      if (!confirm('Remove this income source?')) return;
+      State.removeIncome(id);
+      render();
+    };
+  });
   $('#theme').onchange = (e) => { State.setTheme(e.target.value); };
   $('#show-zero').onchange = (e) => { State.setShowZeroBills(e.target.checked); };
   $('#single-small').onchange = (e) => { State.setSingleSmallMonthly(e.target.checked); };
@@ -2758,7 +2915,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
@@ -2826,6 +2983,21 @@ function showOnboarding() {
         if (pay > 0) State.setPayAmount(pay);
         State.setFrequency(freq);
         if (start) State.setPayStart(start);
+        // Sync first income source with these values (create if none)
+        if (State.incomes && State.incomes.length) {
+          State.updateIncome(State.incomes[0].id, {
+            amount: pay || State.incomes[0].amount || 0,
+            frequency: freq,
+            payStart: start || State.incomes[0].payStart
+          });
+        } else if (pay > 0 || start) {
+          State.addIncome({
+            name: 'Paycheck',
+            amount: pay || 0,
+            frequency: freq,
+            payStart: start || toISO(new Date())
+          });
+        }
         if (mode === 'fresh') { State.bills = []; State.saveBills(); }
         State.setOnboarded(true);
         close();
