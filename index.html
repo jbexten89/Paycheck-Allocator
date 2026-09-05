@@ -1895,7 +1895,14 @@ route('dashboard', (root) => {
                       cellExtra = ` <input class="cell-credit-input" type="number" step="0.01" min="0" placeholder="credit" value="${cred}" data-mkey="${mKey}" />`;
                     }
                     const billObj = State.bills.find((x) => x.id === it.billId);
-                    const dueInfo = (State.dueSoonEnabled && billObj && !billObj.archived && Number(billObj.amount) > 0 && (!billObj.recurrence || billObj.recurrence === 'monthly')) ? dueSoonInfoFor(billObj) : null;
+                    let dueInfo = null;
+                    if (State.dueSoonEnabled && billObj && !billObj.archived && Number(billObj.amount) > 0 && (!billObj.recurrence || billObj.recurrence === 'monthly') && it.dueDate) {
+                      const today0 = new Date(); today0.setHours(0,0,0,0);
+                      const d0 = new Date(it.dueDate.getFullYear(), it.dueDate.getMonth(), it.dueDate.getDate());
+                      const days = Math.round((d0 - today0) / 86400000);
+                      const soon = days >= 0 && days <= (State.dueSoonDays || 5);
+                      dueInfo = { soon, days, dueDate: it.dueDate };
+                    }
                     const classes = [];
                     if (it.amount === 0) classes.push('row-muted');
                     if (dueInfo && dueInfo.soon) classes.push('due-soon');
