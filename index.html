@@ -399,6 +399,9 @@
   .bill-meta { font-size: 11px; color: var(--ink-muted); margin-left: 8px; line-height: 1.2; display: inline; }
   .bill-amount { font-family: var(--sans); font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--good); }
   .badge { display: inline-block; padding: 0 6px; border-radius: 99px; font-size: 10px; background: var(--paper); border: 1px solid var(--hairline); color: var(--ink-muted); margin-left: 6px; }
+  .due-soon-badge { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.55); color: var(--amber); font-weight: 600; }
+  .bill-row.due-soon { background: linear-gradient(90deg, rgba(245, 158, 11, 0.10), rgba(245, 158, 11, 0.02) 60%, transparent); box-shadow: inset 3px 0 0 var(--amber); }
+  tr.due-soon > td { background: rgba(245, 158, 11, 0.09); box-shadow: inset 3px 0 0 var(--amber); }
   .delete-btn { padding: 2px 8px !important; font-size: 12px !important; }
   .cat-group { margin-bottom: 18px; }
   .cat-group:last-child { margin-bottom: 0; }
@@ -738,7 +741,9 @@ const STORE = {
   batchMonthlyCats: 'paycheck_allocator.batch_monthly_cats',
   catShape: 'paycheck_allocator.cat_shape',
   onboarded: 'paycheck_allocator.onboarded',
-  incomes: 'paycheck_allocator.incomes'
+  incomes: 'paycheck_allocator.incomes',
+  dueSoonEnabled: 'paycheck_allocator.due_soon_enabled',
+  dueSoonDays: 'paycheck_allocator.due_soon_days'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1164,6 +1169,8 @@ const State = {
     try { this.collapsedCats = new Set(JSON.parse(localStorage.getItem(STORE.collapsedCats) || '[]')); }
     catch { this.collapsedCats = new Set(); }
     this.showZeroBills = localStorage.getItem(STORE.showZeroBills) === '1';
+    this.dueSoonEnabled = localStorage.getItem(STORE.dueSoonEnabled) !== '0';
+    { const n = parseInt(localStorage.getItem(STORE.dueSoonDays) || '5', 10); this.dueSoonDays = Number.isFinite(n) && n > 0 ? n : 5; }
     this.skipLastOfThree = localStorage.getItem(STORE.skipLastOfThree) === '1';
     this.singleSmallMonthly = localStorage.getItem(STORE.singleSmallMonthly) === '1';
     this.singleSmallThreshold = parseFloat(localStorage.getItem(STORE.singleSmallThreshold) || '500') || 500;
@@ -1228,6 +1235,8 @@ const State = {
   setSchedCount(n) { this.schedCount = n; localStorage.setItem(STORE.schedCount, String(n)); },
   setPayAmount(n) { this.payAmount = n; localStorage.setItem(STORE.payAmount, String(n)); },
   setShowZeroBills(v) { this.showZeroBills = !!v; localStorage.setItem(STORE.showZeroBills, v ? '1' : '0'); },
+  setDueSoonEnabled(v) { this.dueSoonEnabled = !!v; localStorage.setItem(STORE.dueSoonEnabled, v ? '1' : '0'); },
+  setDueSoonDays(n) { const v = Math.max(1, parseInt(n, 10) || 5); this.dueSoonDays = v; localStorage.setItem(STORE.dueSoonDays, String(v)); },
   setSkipLastOfThree(v) { this.skipLastOfThree = !!v; localStorage.setItem(STORE.skipLastOfThree, v ? '1' : '0'); },
   setSingleSmallMonthly(v) { this.singleSmallMonthly = !!v; localStorage.setItem(STORE.singleSmallMonthly, v ? '1' : '0'); },
   setSingleSmallThreshold(n) { this.singleSmallThreshold = n; localStorage.setItem(STORE.singleSmallThreshold, String(n)); },
@@ -1445,6 +1454,8 @@ const Sync = {
       incomes: State.incomes,
       collapsedCats: [...State.collapsedCats],
       showZeroBills: State.showZeroBills,
+      dueSoonEnabled: State.dueSoonEnabled,
+      dueSoonDays: State.dueSoonDays,
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
       singleSmallThreshold: State.singleSmallThreshold,
@@ -1471,6 +1482,8 @@ const Sync = {
     if (Array.isArray(p.incomes)) { State.incomes = p.incomes; State.saveIncomes(); }
     if (Array.isArray(p.collapsedCats)) { State.collapsedCats = new Set(p.collapsedCats); State.persistCollapsed(); }
     if (typeof p.showZeroBills === 'boolean') { State.setShowZeroBills(p.showZeroBills); }
+    if (typeof p.dueSoonEnabled === 'boolean') { State.setDueSoonEnabled(p.dueSoonEnabled); }
+    if (typeof p.dueSoonDays === 'number') { State.setDueSoonDays(p.dueSoonDays); }
     if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
     if (typeof p.singleSmallMonthly === 'boolean') { State.setSingleSmallMonthly(p.singleSmallMonthly); }
     if (typeof p.singleSmallThreshold === 'number') { State.setSingleSmallThreshold(p.singleSmallThreshold); }
@@ -1861,9 +1874,14 @@ route('dashboard', (root) => {
                       const cred = (State.cellCredits || {})[mKey] || '';
                       cellExtra = ` <input class="cell-credit-input" type="number" step="0.01" min="0" placeholder="credit" value="${cred}" data-mkey="${mKey}" />`;
                     }
+                    const billObj = State.bills.find((x) => x.id === it.billId);
+                    const dueInfo = (State.dueSoonEnabled && billObj && !billObj.archived && Number(billObj.amount) > 0) ? dueSoonInfoFor(billObj) : null;
+                    const classes = [];
+                    if (it.amount === 0) classes.push('row-muted');
+                    if (dueInfo && dueInfo.soon) classes.push('due-soon');
                     return `
-                    <tr${it.amount === 0 ? ' class="row-muted"' : ''}>
-                      <td>${escapeHtml(it.name)}${cellExtra}</td>
+                    <tr${classes.length ? ` class="${classes.join(' ')}"` : ''}>
+                      <td>${escapeHtml(it.name)}${cellExtra}${dueSoonChipHtml(dueInfo)}</td>
                       <td>${it.dueDate ? fmtDateShort.format(it.dueDate) : '—'}</td>
                       <td class="total">${fmtUSD.format(it.amount)}</td>
                     </tr>`;
@@ -1911,6 +1929,34 @@ function daysUntil(d) {
   return `in ${diff} days`;
 }
 
+// Returns { soon, days, dueDate } for a bill's next occurrence relative to today.
+function dueSoonInfoFor(bill) {
+  try {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const rec = bill.recurrence || 'monthly';
+    let dueDate;
+    if (rec === 'everyNWeeks' || rec === 'everyNMonths') {
+      // nextDueCycleFor's "next" is strictly after the reference; step back a day
+      // so a bill due today (or scheduled for today) still counts as "today".
+      const ref = new Date(today.getTime() - 86400000);
+      dueDate = nextDueCycleFor(bill, ref).D;
+    } else {
+      // Monthly (day-of-month) recurrence
+      const day = Math.max(1, Math.min(31, Number(bill.dueDay) || 1));
+      dueDate = dueDateInMonth(today.getFullYear(), today.getMonth(), day);
+      if (dueDate < today) dueDate = dueDateInMonth(today.getFullYear(), today.getMonth() + 1, day);
+    }
+    const days = Math.round((dueDate - today) / 86400000);
+    const soon = days >= 0 && days <= (State.dueSoonDays || 5);
+    return { soon, days, dueDate };
+  } catch { return { soon: false, days: null, dueDate: null }; }
+}
+function dueSoonChipHtml(info) {
+  if (!info || !info.soon) return '';
+  const label = info.days === 0 ? 'due today' : info.days === 1 ? 'due tomorrow' : `due in ${info.days}d`;
+  return `<span class="badge due-soon-badge">${label}</span>`;
+}
+
 route('bills', (root) => {
   root.innerHTML = `
     <div class="view-header">
@@ -1950,8 +1996,11 @@ route('bills', (root) => {
                   <button class="cat-delete" data-cat-delete="${escapeAttr(cat)}" aria-label="Delete category">✕</button>
                 </div>
                 <div class="bill-list" role="list">
-                  ${bills.map((b) => `
-                    <div class="bill-row${b.archived ? ' bill-archived' : ''}" role="listitem" data-id="${b.id}" tabindex="0">
+                  ${bills.map((b) => {
+                    const dueInfo = (State.dueSoonEnabled && !b.archived && Number(b.amount) > 0) ? dueSoonInfoFor(b) : null;
+                    const soon = dueInfo && dueInfo.soon;
+                    return `
+                    <div class="bill-row${b.archived ? ' bill-archived' : ''}${soon ? ' due-soon' : ''}" role="listitem" data-id="${b.id}" tabindex="0">
                       <div>
                         <span class="bill-name">${escapeHtml(b.name)}</span>
                         <span class="bill-meta">${
@@ -1960,12 +2009,12 @@ route('bills', (root) => {
                           : b.recurrence === 'everyNMonths'
                             ? `Every ${b.intervalMonths || 1}mo from ${b.dueAnchor ? fmtDateShort.format(parseISO(b.dueAnchor)) : '—'}`
                             : `Due ${b.dueDay}`
-                        }${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}${b.archived ? `<span class="badge">archived</span>` : ''}</span>
+                        }${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}${b.archived ? `<span class="badge">archived</span>` : ''}${dueSoonChipHtml(dueInfo)}</span>
                       </div>
                       <div class="bill-amount">${fmtUSD.format(b.amount)}</div>
                       <span class="drag-handle" aria-label="Drag to reorder">⋮⋮</span>
                     </div>
-                  `).join('')}
+                  `; }).join('')}
                 </div>
               </div>
             `;
@@ -2610,6 +2659,16 @@ route('settings', (root) => {
         </div>
       </div>
       <div class="card">
+        <h2>Due-soon highlight</h2>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <input id="due-soon-enable" type="checkbox" ${State.dueSoonEnabled ? 'checked' : ''} style="width:auto;" />
+          <label for="due-soon-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Highlight bills due within</label>
+          <input id="due-soon-days" type="number" min="1" step="1" value="${State.dueSoonDays}" style="width:70px;" />
+          <label style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">days</label>
+        </div>
+        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-top:8px;">Applies on the Bills page and the Dashboard's next-paycheck breakdown. Uses each bill's next occurrence.</div>
+      </div>
+      <div class="card">
         <h2>Cell credit</h2>
         <div style="display:flex; align-items:center; gap:10px;">
           <input id="cell-credit-enable" type="checkbox" ${State.cellCreditEnabled ? 'checked' : ''} style="width:auto;" />
@@ -2792,6 +2851,10 @@ route('settings', (root) => {
   });
   const cellCreditEl = $('#cell-credit-enable');
   if (cellCreditEl) cellCreditEl.onchange = (e) => { State.setCellCreditEnabled(e.target.checked); };
+  const dueSoonEnable = $('#due-soon-enable');
+  if (dueSoonEnable) dueSoonEnable.onchange = (e) => { State.setDueSoonEnabled(e.target.checked); };
+  const dueSoonDays = $('#due-soon-days');
+  if (dueSoonDays) dueSoonDays.onchange = (e) => { State.setDueSoonDays(e.target.value); };
 
   const getCreds = () => ({
     email: ($('#sync-email')?.value || '').trim(),
@@ -2915,7 +2978,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
