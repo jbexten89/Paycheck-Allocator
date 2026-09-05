@@ -743,7 +743,8 @@ const STORE = {
   onboarded: 'paycheck_allocator.onboarded',
   incomes: 'paycheck_allocator.incomes',
   dueSoonEnabled: 'paycheck_allocator.due_soon_enabled',
-  dueSoonDays: 'paycheck_allocator.due_soon_days'
+  dueSoonDays: 'paycheck_allocator.due_soon_days',
+  dueSoonCatsOff: 'paycheck_allocator.due_soon_cats_off'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1171,6 +1172,8 @@ const State = {
     this.showZeroBills = localStorage.getItem(STORE.showZeroBills) === '1';
     this.dueSoonEnabled = localStorage.getItem(STORE.dueSoonEnabled) !== '0';
     { const n = parseInt(localStorage.getItem(STORE.dueSoonDays) || '5', 10); this.dueSoonDays = Number.isFinite(n) && n > 0 ? n : 5; }
+    try { this.dueSoonCatsOff = new Set(JSON.parse(localStorage.getItem(STORE.dueSoonCatsOff) || '[]').map((s) => String(s).toLowerCase())); }
+    catch { this.dueSoonCatsOff = new Set(); }
     this.skipLastOfThree = localStorage.getItem(STORE.skipLastOfThree) === '1';
     this.singleSmallMonthly = localStorage.getItem(STORE.singleSmallMonthly) === '1';
     this.singleSmallThreshold = parseFloat(localStorage.getItem(STORE.singleSmallThreshold) || '500') || 500;
@@ -1237,6 +1240,13 @@ const State = {
   setShowZeroBills(v) { this.showZeroBills = !!v; localStorage.setItem(STORE.showZeroBills, v ? '1' : '0'); },
   setDueSoonEnabled(v) { this.dueSoonEnabled = !!v; localStorage.setItem(STORE.dueSoonEnabled, v ? '1' : '0'); },
   setDueSoonDays(n) { const v = Math.max(1, parseInt(n, 10) || 5); this.dueSoonDays = v; localStorage.setItem(STORE.dueSoonDays, String(v)); },
+  setDueSoonCat(cat, enabled) {
+    const key = (cat || '').toLowerCase();
+    if (!key) return;
+    if (enabled) this.dueSoonCatsOff.delete(key); else this.dueSoonCatsOff.add(key);
+    localStorage.setItem(STORE.dueSoonCatsOff, JSON.stringify([...this.dueSoonCatsOff]));
+  },
+  isDueSoonCat(cat) { return !this.dueSoonCatsOff.has((cat || '').toLowerCase()); },
   setSkipLastOfThree(v) { this.skipLastOfThree = !!v; localStorage.setItem(STORE.skipLastOfThree, v ? '1' : '0'); },
   setSingleSmallMonthly(v) { this.singleSmallMonthly = !!v; localStorage.setItem(STORE.singleSmallMonthly, v ? '1' : '0'); },
   setSingleSmallThreshold(n) { this.singleSmallThreshold = n; localStorage.setItem(STORE.singleSmallThreshold, String(n)); },
@@ -1456,6 +1466,7 @@ const Sync = {
       showZeroBills: State.showZeroBills,
       dueSoonEnabled: State.dueSoonEnabled,
       dueSoonDays: State.dueSoonDays,
+      dueSoonCatsOff: [...State.dueSoonCatsOff],
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
       singleSmallThreshold: State.singleSmallThreshold,
@@ -1484,6 +1495,10 @@ const Sync = {
     if (typeof p.showZeroBills === 'boolean') { State.setShowZeroBills(p.showZeroBills); }
     if (typeof p.dueSoonEnabled === 'boolean') { State.setDueSoonEnabled(p.dueSoonEnabled); }
     if (typeof p.dueSoonDays === 'number') { State.setDueSoonDays(p.dueSoonDays); }
+    if (Array.isArray(p.dueSoonCatsOff)) {
+      State.dueSoonCatsOff = new Set(p.dueSoonCatsOff.map((s) => String(s).toLowerCase()));
+      localStorage.setItem(STORE.dueSoonCatsOff, JSON.stringify([...State.dueSoonCatsOff]));
+    }
     if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
     if (typeof p.singleSmallMonthly === 'boolean') { State.setSingleSmallMonthly(p.singleSmallMonthly); }
     if (typeof p.singleSmallThreshold === 'number') { State.setSingleSmallThreshold(p.singleSmallThreshold); }
@@ -1896,7 +1911,7 @@ route('dashboard', (root) => {
                     }
                     const billObj = State.bills.find((x) => x.id === it.billId);
                     let dueInfo = null;
-                    if (State.dueSoonEnabled && billObj && !billObj.archived && Number(billObj.amount) > 0 && (!billObj.recurrence || billObj.recurrence === 'monthly') && it.dueDate) {
+                    if (State.dueSoonEnabled && billObj && !billObj.archived && Number(billObj.amount) > 0 && (!billObj.recurrence || billObj.recurrence === 'monthly') && State.isDueSoonCat((billObj.category || '').trim() || 'Uncategorized') && it.dueDate) {
                       const today0 = new Date(); today0.setHours(0,0,0,0);
                       const d0 = new Date(it.dueDate.getFullYear(), it.dueDate.getMonth(), it.dueDate.getDate());
                       const days = Math.round((d0 - today0) / 86400000);
@@ -2024,7 +2039,7 @@ route('bills', (root) => {
                 </div>
                 <div class="bill-list" role="list">
                   ${bills.map((b) => {
-                    const dueInfo = (State.dueSoonEnabled && !b.archived && Number(b.amount) > 0 && (!b.recurrence || b.recurrence === 'monthly')) ? dueSoonInfoFor(b) : null;
+                    const dueInfo = (State.dueSoonEnabled && !b.archived && Number(b.amount) > 0 && (!b.recurrence || b.recurrence === 'monthly') && State.isDueSoonCat((b.category || '').trim() || 'Uncategorized')) ? dueSoonInfoFor(b) : null;
                     const soon = dueInfo && dueInfo.soon;
                     return `
                     <div class="bill-row${b.archived ? ' bill-archived' : ''}${soon ? ' due-soon' : ''}" role="listitem" data-id="${b.id}" tabindex="0">
@@ -2694,6 +2709,21 @@ route('settings', (root) => {
           <label style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">days</label>
         </div>
         <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-top:8px;">Applies on the Bills page and the Dashboard's next-paycheck breakdown. Uses each bill's next occurrence.</div>
+        ${(() => {
+          const cats = State.orderedCategories();
+          if (!cats.length) return '';
+          return `<div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--hairline);">
+            <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:8px;">Apply reminder to:</div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${cats.map((cat) => `
+                <label style="display:flex; align-items:center; gap:8px; margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink); cursor:pointer;">
+                  <input type="checkbox" class="due-soon-cat" data-cat="${escapeAttr(cat)}" ${State.isDueSoonCat(cat) ? 'checked' : ''} style="width:auto;" />
+                  <span>${escapeHtml(cat)}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>`;
+        })()}
       </div>
       <div class="card">
         <h2>Cell credit</h2>
@@ -2882,6 +2912,9 @@ route('settings', (root) => {
   if (dueSoonEnable) dueSoonEnable.onchange = (e) => { State.setDueSoonEnabled(e.target.checked); };
   const dueSoonDays = $('#due-soon-days');
   if (dueSoonDays) dueSoonDays.onchange = (e) => { State.setDueSoonDays(e.target.value); };
+  $$('.due-soon-cat').forEach((el) => {
+    el.onchange = () => { State.setDueSoonCat(el.dataset.cat, el.checked); };
+  });
 
   const getCreds = () => ({
     email: ($('#sync-email')?.value || '').trim(),
@@ -3004,7 +3037,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
