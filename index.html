@@ -1954,7 +1954,7 @@ route('dashboard', (root) => {
     inp.addEventListener('change', () => {
       State.setCellCredit(inp.dataset.mkey, parseFloat(inp.value) || 0);
       const y = window.scrollY;
-      render();
+      navigate();
       requestAnimationFrame(() => window.scrollTo(0, y));
     });
   });
@@ -2871,7 +2871,7 @@ route('settings', (root) => {
       frequency: 'biweekly',
       payStart: State.payStart || toISO(new Date())
     });
-    render();
+    navigate();
   };
   $$('#incomes-list .income-row').forEach((row) => {
     const id = row.dataset.id;
@@ -2896,7 +2896,7 @@ route('settings', (root) => {
       if ((State.incomes || []).length <= 1) { alert('Keep at least one income source.'); return; }
       if (!confirm('Remove this income source?')) return;
       State.removeIncome(id);
-      render();
+      navigate();
     };
   });
   $('#theme').onchange = (e) => { State.setTheme(e.target.value); };
