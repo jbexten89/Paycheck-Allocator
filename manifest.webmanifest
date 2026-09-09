@@ -1,19 +1,43 @@
 {
   "name": "Paycheck Allocator",
   "short_name": "Paychecks",
-  "description": "Calculate how much to set aside from each biweekly paycheck to cover monthly bills.",
+  "description": "Split each paycheck across your monthly bills so nothing sneaks up on you.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0E1014",
-  "theme_color": "#3B82F6",
+  "theme_color": "#0E1014",
+  "categories": ["finance", "productivity", "utilities"],
   "icons": [
     {
       "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Add bill",
+      "short_name": "Add bill",
+      "description": "Open the new-bill form",
+      "url": "./index.html#bills?add=1",
+      "icons": [{ "src": "icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Pay schedule",
+      "short_name": "Schedule",
+      "description": "View the upcoming pay schedule",
+      "url": "./index.html#schedule",
+      "icons": [{ "src": "icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Settings",
+      "short_name": "Settings",
+      "description": "Open settings",
+      "url": "./index.html#settings",
+      "icons": [{ "src": "icon.svg", "sizes": "any" }]
     }
   ]
 }

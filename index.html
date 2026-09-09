@@ -3,9 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
-<meta name="theme-color" content="#0E1014" />
 <meta name="theme-color" content="#0E1014" media="(prefers-color-scheme: dark)" />
-<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#0E1014" media="(prefers-color-scheme: light)" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -14,8 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="icon" type="image/svg+xml" href="icon.svg" />
 <link rel="apple-touch-icon" href="icon.svg" />
-<!-- iOS splash: a single SVG data URI covers all sizes -->
-<link rel="apple-touch-startup-image" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1366'%3E%3Crect width='1024' height='1366' fill='%230E1014'/%3E%3Ctext x='512' y='720' text-anchor='middle' font-family='-apple-system,Inter,sans-serif' font-size='420' font-weight='700' fill='%233B82F6'%3E%24%3C/text%3E%3Ctext x='512' y='840' text-anchor='middle' font-family='-apple-system,Inter,sans-serif' font-size='56' fill='%23C7CDD8' letter-spacing='8'%3EPAYCHECKS%3C/text%3E%3C/svg%3E" />
+<!-- iOS splash: centered logo + wordmark on the app's dark ground -->
+<link rel="apple-touch-startup-image" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1284 2778' preserveAspectRatio='xMidYMid slice'%3E%3Crect width='1284' height='2778' fill='%230E1014'/%3E%3Cg transform='translate(642 1289)'%3E%3Crect x='-192' y='-192' width='384' height='384' rx='72' fill='%230E1014' stroke='%233B82F6' stroke-width='6'/%3E%3Ctext x='0' y='72' text-anchor='middle' font-family='-apple-system,Inter,sans-serif' font-size='260' font-weight='700' fill='%233B82F6'%3E%24%3C/text%3E%3C/g%3E%3Ctext x='642' y='1660' text-anchor='middle' font-family='-apple-system,Inter,sans-serif' font-size='72' font-weight='500' fill='%23E5E7EB'%3EPaycheck Allocator%3C/text%3E%3Ctext x='642' y='1720' text-anchor='middle' font-family='-apple-system,Inter,sans-serif' font-size='36' fill='%236B7280' letter-spacing='2'%3ELedger edition%3C/text%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -604,6 +603,32 @@
       /* clear the ~56px mobile tab bar + safe-area inset */
       bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     }
+  }
+
+  /* Install pill (PWA install prompt) */
+  .install-pill {
+    position: fixed;
+    left: 50%; transform: translateX(-50%);
+    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    background: var(--paper-2); color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    padding: 10px 14px 10px 16px;
+    display: flex; align-items: center; gap: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+    z-index: 60; font-size: 13px;
+    max-width: calc(100vw - 32px);
+  }
+  .install-pill .install-msg { display: flex; flex-direction: column; line-height: 1.25; }
+  .install-pill .install-msg b { font-size: 13px; font-weight: 600; color: var(--ink); }
+  .install-pill .install-msg span { font-size: 11px; color: var(--ink-muted); }
+  .install-pill .btn { padding: 6px 12px !important; font-size: 12px !important; }
+  .install-pill .install-x {
+    background: transparent; border: none; color: var(--ink-muted); font-size: 18px;
+    padding: 0 4px; cursor: pointer; line-height: 1;
+  }
+  @media (max-width: 768px) {
+    .install-pill { bottom: calc(140px + env(safe-area-inset-bottom, 0px)); }
   }
 
   /* Modal */
@@ -1656,8 +1681,10 @@ function releaseScrollLock() {
 
 function navigate() {
   releaseScrollLock();
-  const hash = location.hash.replace(/^#/, '') || 'dashboard';
-  const [base, ...rest] = hash.split('/');
+  const rawHash = location.hash.replace(/^#/, '') || 'dashboard';
+  const [path, query] = rawHash.split('?');
+  const params = new URLSearchParams(query || '');
+  const [base, ...rest] = path.split('/');
   const fn = routes[base] || routes.dashboard;
   $$('.nav a, .tabbar a').forEach((a) => a.classList.toggle('active', a.dataset.route === base));
   const main = $('#main');
@@ -1667,6 +1694,12 @@ function navigate() {
   main.appendChild(view);
   fn(view, rest);
   window.scrollTo({ top: 0 });
+  // Manifest-shortcut hooks: e.g. #bills?add=1 opens the new-bill editor
+  if (base === 'bills' && params.get('add') === '1' && typeof openBillEditor === 'function') {
+    setTimeout(() => openBillEditor(null), 100);
+    // Clear the query so a back/forward doesn't re-open
+    history.replaceState(null, '', location.pathname + location.search + '#bills');
+  }
 }
 window.addEventListener('hashchange', navigate);
 
@@ -3145,6 +3178,65 @@ navigate();
 if (!State.onboarded && !Sync.user) {
   setTimeout(showOnboarding, 200);
 }
+
+/* ---------------- PWA install prompt ---------------- */
+(function initInstall() {
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+  if (isStandalone) return;
+  const DISMISS_KEY = 'paycheck_allocator.install_dismissed_at';
+  const dismissedAt = parseInt(localStorage.getItem(DISMISS_KEY) || '0', 10);
+  const WEEK = 7 * 24 * 60 * 60 * 1000;
+  if (dismissedAt && (Date.now() - dismissedAt) < WEEK) return;
+
+  let deferredPrompt = null;
+
+  const showPill = (mode) => {
+    if (document.getElementById('install-pill')) return;
+    const pill = document.createElement('div');
+    pill.id = 'install-pill';
+    pill.className = 'install-pill';
+    const msg = mode === 'ios'
+      ? `<div class="install-msg"><b>Install this app</b><span>Tap Share, then "Add to Home Screen"</span></div>`
+      : `<div class="install-msg"><b>Install this app</b><span>Get one-tap access from your home screen</span></div>`;
+    const actionBtn = mode === 'ios' ? '' : `<button class="btn btn-primary" data-x="install">Install</button>`;
+    pill.innerHTML = `${msg}${actionBtn}<button class="install-x" data-x="close" aria-label="Dismiss">✕</button>`;
+    document.body.appendChild(pill);
+    pill.querySelector('[data-x="close"]').onclick = () => {
+      localStorage.setItem(DISMISS_KEY, String(Date.now()));
+      pill.remove();
+    };
+    const installBtn = pill.querySelector('[data-x="install"]');
+    if (installBtn) installBtn.onclick = async () => {
+      if (!deferredPrompt) return;
+      installBtn.disabled = true;
+      try {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        if (outcome === 'accepted') pill.remove();
+        else installBtn.disabled = false;
+      } catch { installBtn.disabled = false; }
+    };
+  };
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    setTimeout(() => showPill('android'), 1500);
+  });
+  window.addEventListener('appinstalled', () => {
+    const pill = document.getElementById('install-pill');
+    if (pill) pill.remove();
+    localStorage.setItem(DISMISS_KEY, String(Date.now()));
+  });
+
+  // iOS Safari: no beforeinstallprompt; show a hint pill
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  const isSafari = isIOS && /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
+  if (isSafari) setTimeout(() => showPill('ios'), 2000);
+})();
 
 function showOnboarding() {
   const today = toISO(new Date());
