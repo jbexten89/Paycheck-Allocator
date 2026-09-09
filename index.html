@@ -220,6 +220,8 @@
 
   .view { animation: fade 200ms ease; }
   @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--hairline); border-top-color: var(--good); animation: spin 700ms linear infinite; flex-shrink: 0; }
 
   /* Cards */
   .card {
@@ -2089,8 +2091,9 @@ function dueSoonChipHtml(info) {
 
 // Payment-shape optimizer: pick the shape per category that maximizes
 // the smallest per-pay leftover across the next N pays.
-function optimizeShapes(nPays = 26) {
+async function optimizeShapes(nPays = 26, onProgress) {
   const shapes = ['spread', 'single-cycle', 'first-two-of-three', 'monthly-rate'];
+  const yieldNow = () => new Promise((r) => setTimeout(r, 0));
   const catFor = (b) => ((b.category || '').trim() || 'Uncategorized');
 
   // Categories that actually have active, positive bills — those are the levers.
@@ -2142,28 +2145,49 @@ function optimizeShapes(nPays = 26) {
   const CAP = 20000;
 
   if (totalCombos <= CAP) {
-    // Exhaustive brute force
-    const enumerate = (i, acc) => {
-      if (i === N) {
-        const r = evalCombo(acc);
-        if (cmp(r, best.result) > 0) best = { combo: { ...acc }, result: r };
-        return;
+    // Exhaustive brute force — iterative so we can yield.
+    const idx = new Array(N).fill(0);
+    let done = false;
+    let tried = 0;
+    const acc = {};
+    while (!done) {
+      for (let i = 0; i < N; i++) acc[cats[i]] = shapes[idx[i]];
+      const r = evalCombo(acc);
+      if (cmp(r, best.result) > 0) best = { combo: { ...acc }, result: r };
+      tried++;
+      if (onProgress && (tried % 200 === 0 || tried === totalCombos)) {
+        onProgress({ phase: 'exhaustive', tried, total: totalCombos, bestMin: best.result.min });
+        await yieldNow();
       }
-      for (const s of shapes) { acc[cats[i]] = s; enumerate(i + 1, acc); }
-    };
-    enumerate(0, {});
+      // advance
+      let k = N - 1;
+      while (k >= 0) {
+        idx[k]++;
+        if (idx[k] < shapes.length) break;
+        idx[k] = 0; k--;
+      }
+      if (k < 0) done = true;
+    }
   } else {
     // Greedy hill-climb from current
     let improved = true;
+    let pass = 0;
+    let tried = 0;
     while (improved) {
       improved = false;
+      pass++;
       for (const cat of cats) {
         const orig = best.combo[cat];
         for (const s of shapes) {
           if (s === orig) continue;
           const trial = { ...best.combo, [cat]: s };
           const r = evalCombo(trial);
+          tried++;
           if (cmp(r, best.result) > 0) { best = { combo: trial, result: r }; improved = true; }
+        }
+        if (onProgress) {
+          onProgress({ phase: 'greedy', pass, tried, bestMin: best.result.min });
+          await yieldNow();
         }
       }
     }
@@ -2197,8 +2221,62 @@ const SHAPE_LABELS = {
   'monthly-rate': 'Monthly rate'
 };
 
-function runOptimizeShapes() {
-  const r = optimizeShapes(26);
+async function runOptimizeShapes() {
+  const btn = document.getElementById('optimize-shapes');
+  const originalBtnText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Optimizing…'; }
+
+  // Progress modal
+  let progressEl = null;
+  openModal(`
+    <div class="modal-header"><h3>Optimizing…</h3></div>
+    <div class="modal-body">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div class="spinner" aria-hidden="true"></div>
+        <div id="opt-progress" style="font-size:13px; color:var(--ink);">Preparing…</div>
+      </div>
+      <div id="opt-progress-bar" style="margin-top:12px; height:6px; background:var(--paper); border-radius:3px; overflow:hidden;">
+        <div id="opt-progress-fill" style="height:100%; width:0%; background:var(--good); transition: width 120ms linear;"></div>
+      </div>
+      <div id="opt-progress-meta" class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:8px;">&nbsp;</div>
+    </div>
+  `, {
+    onMount(el) { progressEl = el; }
+  });
+
+  const setProgress = (p) => {
+    if (!progressEl) return;
+    const text = progressEl.querySelector('#opt-progress');
+    const fill = progressEl.querySelector('#opt-progress-fill');
+    const meta = progressEl.querySelector('#opt-progress-meta');
+    if (p.phase === 'exhaustive') {
+      const pct = p.total ? Math.min(100, Math.round((p.tried / p.total) * 100)) : 0;
+      if (text) text.textContent = `Trying combinations… ${p.tried.toLocaleString()} / ${p.total.toLocaleString()}`;
+      if (fill) fill.style.width = pct + '%';
+      if (meta) meta.textContent = `Best min leftover so far: ${fmtUSD.format(p.bestMin)}`;
+    } else if (p.phase === 'greedy') {
+      if (text) text.textContent = `Refining (pass ${p.pass})… ${p.tried.toLocaleString()} trials`;
+      if (fill) fill.style.width = '100%';
+      if (meta) meta.textContent = `Best min leftover so far: ${fmtUSD.format(p.bestMin)}`;
+    }
+  };
+
+  // Yield once so the loading modal paints before we start work
+  await new Promise((r) => setTimeout(r, 30));
+
+  let r;
+  try {
+    r = await optimizeShapes(26, setProgress);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = originalBtnText; }
+    document.querySelector('.modal-backdrop')?.remove();
+    alert('Optimize failed: ' + e.message);
+    return;
+  }
+  // Close the progress modal
+  document.querySelector('.modal-backdrop')?.remove();
+  if (btn) { btn.disabled = false; btn.textContent = originalBtnText; }
+
   if (r.error) { alert(r.error); return; }
   const anyChange = r.changes.some((c) => c.changed);
   const gainMin = r.best.min - r.current.min;
