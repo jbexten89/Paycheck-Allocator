@@ -769,7 +769,9 @@ const STORE = {
   dueSoonEnabled: 'paycheck_allocator.due_soon_enabled',
   dueSoonDays: 'paycheck_allocator.due_soon_days',
   dueSoonCatsOff: 'paycheck_allocator.due_soon_cats_off',
-  yearViewEnabled: 'paycheck_allocator.year_view_enabled'
+  yearViewEnabled: 'paycheck_allocator.year_view_enabled',
+  catShapePrev: 'paycheck_allocator.cat_shape_prev',
+  catShapePrevAt: 'paycheck_allocator.cat_shape_prev_at'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1264,6 +1266,9 @@ const State = {
     // Unified per-category payment shape. Values: 'spread' | 'single-cycle' | 'first-two-of-three' | 'monthly-rate'
     try { this.catShape = JSON.parse(localStorage.getItem(STORE.catShape) || '{}') || {}; }
     catch { this.catShape = {}; }
+    try { const raw = localStorage.getItem(STORE.catShapePrev); this.catShapePrev = raw ? JSON.parse(raw) : null; }
+    catch { this.catShapePrev = null; }
+    this.catShapePrevAt = localStorage.getItem(STORE.catShapePrevAt) || null;
     this.onboarded = localStorage.getItem(STORE.onboarded) === '1';
     try { this.incomes = JSON.parse(localStorage.getItem(STORE.incomes) || '[]') || []; }
     catch { this.incomes = []; }
@@ -1347,6 +1352,31 @@ const State = {
     localStorage.setItem(STORE.singlePayCats, JSON.stringify([...this.singlePayCats]));
     this.batchMonthlyCats.delete(key); if (shape === 'monthly-rate') this.batchMonthlyCats.add(key);
     localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...this.batchMonthlyCats]));
+  },
+  saveCatShapeSnapshot() {
+    this.catShapePrev = { ...(this.catShape || {}) };
+    this.catShapePrevAt = new Date().toISOString();
+    localStorage.setItem(STORE.catShapePrev, JSON.stringify(this.catShapePrev));
+    localStorage.setItem(STORE.catShapePrevAt, this.catShapePrevAt);
+  },
+  clearCatShapeSnapshot() {
+    this.catShapePrev = null;
+    this.catShapePrevAt = null;
+    localStorage.removeItem(STORE.catShapePrev);
+    localStorage.removeItem(STORE.catShapePrevAt);
+  },
+  restoreCatShapeSnapshot() {
+    if (!this.catShapePrev) return false;
+    // Overwrite catShape wholesale
+    this.catShape = { ...this.catShapePrev };
+    localStorage.setItem(STORE.catShape, JSON.stringify(this.catShape));
+    // Realign legacy sets
+    this.singlePayCats = new Set(Object.entries(this.catShape).filter(([_, v]) => v === 'single-cycle').map(([k]) => k));
+    this.batchMonthlyCats = new Set(Object.entries(this.catShape).filter(([_, v]) => v === 'monthly-rate').map(([k]) => k));
+    localStorage.setItem(STORE.singlePayCats, JSON.stringify([...this.singlePayCats]));
+    localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...this.batchMonthlyCats]));
+    this.clearCatShapeSnapshot();
+    return true;
   },
   getCatShape(cat) { return this.catShape[(cat || '').toLowerCase()] || 'spread'; },
   setOnboarded(v) { this.onboarded = !!v; localStorage.setItem(STORE.onboarded, v ? '1' : '0'); },
@@ -2409,6 +2439,7 @@ async function runOptimizeShapes() {
       el.querySelectorAll('[data-x="close"]').forEach((x) => x.onclick = close);
       const apply = el.querySelector('[data-x="apply"]');
       if (apply) apply.onclick = () => {
+        State.saveCatShapeSnapshot();
         for (const c of r.changes) if (c.changed) State.setCatShape(c.cat, c.to);
         close();
         navigate();
@@ -3090,8 +3121,12 @@ route('settings', (root) => {
       <div class="card">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
           <h2 style="margin:0;">Payment shape</h2>
-          <button class="btn" id="optimize-shapes" title="Try every combination of shapes and pick the one with the biggest smallest-per-pay leftover">Optimize</button>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            ${State.catShapePrev ? `<button class="btn" id="revert-shapes" title="Restore your shape settings from ${State.catShapePrevAt ? new Date(State.catShapePrevAt).toLocaleString() : ''}">Revert to pre-optimize</button>` : ''}
+            <button class="btn" id="optimize-shapes" title="Try every combination of shapes and pick the one with the biggest smallest-per-pay leftover">Optimize</button>
+          </div>
         </div>
+        ${State.catShapePrev ? `<div class="hint" style="font-size:11px; color:var(--ink-muted); margin:6px 0 0 0;">A snapshot from ${State.catShapePrevAt ? new Date(State.catShapePrevAt).toLocaleString() : 'earlier'} is saved. Revert restores it.</div>` : ''}
         <div class="hint" style="font-size:12px; color:var(--ink-muted); margin:8px 0 10px 0;">How each category's bills are spread across paychecks in a cycle.</div>
         ${(() => {
           const present = State.orderedCategories().filter((c) => c !== 'Uncategorized');
@@ -3337,6 +3372,14 @@ route('settings', (root) => {
   });
   const optimizeBtn = $('#optimize-shapes');
   if (optimizeBtn) optimizeBtn.onclick = () => runOptimizeShapes();
+  const revertBtn = $('#revert-shapes');
+  if (revertBtn) revertBtn.onclick = () => {
+    if (!confirm('Restore payment shapes to the snapshot saved before your last Optimize?')) return;
+    if (State.restoreCatShapeSnapshot()) {
+      try { Sync.push(); } catch {}
+      navigate();
+    }
+  };
   const cellCreditEl = $('#cell-credit-enable');
   if (cellCreditEl) cellCreditEl.onchange = (e) => { State.setCellCreditEnabled(e.target.checked); };
   const dueSoonEnable = $('#due-soon-enable');
