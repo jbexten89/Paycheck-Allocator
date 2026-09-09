@@ -771,7 +771,8 @@ const STORE = {
   dueSoonCatsOff: 'paycheck_allocator.due_soon_cats_off',
   yearViewEnabled: 'paycheck_allocator.year_view_enabled',
   catShapePrev: 'paycheck_allocator.cat_shape_prev',
-  catShapePrevAt: 'paycheck_allocator.cat_shape_prev_at'
+  catShapePrevAt: 'paycheck_allocator.cat_shape_prev_at',
+  roundSetAside: 'paycheck_allocator.round_set_aside'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1129,6 +1130,40 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
     }
   }
+  // Optional dollar rounding — nearest $1. Runs LAST so it wins over any
+  // earlier post-process (weighted-spread, monthly-rate). Per-bill-per-cycle
+  // drift is absorbed into the largest share so cycle totals still equal
+  // the bill amount when rounded.
+  if (typeof State !== 'undefined' && State.roundSetAside) {
+    const byBillCycle = new Map();
+    perPaycheck.forEach((p, idx) => {
+      for (const it of p.items) {
+        const key = it.billId + '|' + toISO(it.dueDate);
+        if (!byBillCycle.has(key)) byBillCycle.set(key, []);
+        byBillCycle.get(key).push({ idx, item: it });
+      }
+    });
+    byBillCycle.forEach((entries) => {
+      if (entries.length === 0) return;
+      const cycleTotal = entries.reduce((s, e) => s + e.item.amount, 0);
+      if (cycleTotal <= 0) return;
+      const targetTotal = Math.round(cycleTotal);
+      const rounded = entries.map((e) => Math.round(e.item.amount));
+      const drift = targetTotal - rounded.reduce((s, v) => s + v, 0);
+      if (drift !== 0) {
+        const maxIdx = rounded.indexOf(Math.max(...rounded));
+        rounded[maxIdx] += drift;
+      }
+      entries.forEach((e, k) => {
+        const delta = rounded[k] - e.item.amount;
+        perPaycheck[e.idx].total += delta;
+        e.item.amount = rounded[k];
+        if (typeof e.item.runningBalance === 'number') {
+          e.item.runningBalance = Math.round(e.item.runningBalance);
+        }
+      });
+    });
+  }
   return { perPaycheck, byBill };
 }
 
@@ -1262,6 +1297,7 @@ const State = {
     try { this.dueSoonCatsOff = new Set(JSON.parse(localStorage.getItem(STORE.dueSoonCatsOff) || '[]').map((s) => String(s).toLowerCase())); }
     catch { this.dueSoonCatsOff = new Set(); }
     this.yearViewEnabled = localStorage.getItem(STORE.yearViewEnabled) !== '0';
+    this.roundSetAside = localStorage.getItem(STORE.roundSetAside) === '1';
     this.skipLastOfThree = localStorage.getItem(STORE.skipLastOfThree) === '1';
     this.singleSmallMonthly = localStorage.getItem(STORE.singleSmallMonthly) === '1';
     this.singleSmallThreshold = parseFloat(localStorage.getItem(STORE.singleSmallThreshold) || '500') || 500;
@@ -1339,6 +1375,7 @@ const State = {
   },
   isDueSoonCat(cat) { return !this.dueSoonCatsOff.has((cat || '').toLowerCase()); },
   setYearViewEnabled(v) { this.yearViewEnabled = !!v; localStorage.setItem(STORE.yearViewEnabled, v ? '1' : '0'); },
+  setRoundSetAside(v) { this.roundSetAside = !!v; localStorage.setItem(STORE.roundSetAside, v ? '1' : '0'); },
   setSkipLastOfThree(v) { this.skipLastOfThree = !!v; localStorage.setItem(STORE.skipLastOfThree, v ? '1' : '0'); },
   setSingleSmallMonthly(v) { this.singleSmallMonthly = !!v; localStorage.setItem(STORE.singleSmallMonthly, v ? '1' : '0'); },
   setSingleSmallThreshold(n) { this.singleSmallThreshold = n; localStorage.setItem(STORE.singleSmallThreshold, String(n)); },
@@ -1585,6 +1622,7 @@ const Sync = {
       dueSoonDays: State.dueSoonDays,
       dueSoonCatsOff: [...State.dueSoonCatsOff],
       yearViewEnabled: State.yearViewEnabled,
+      roundSetAside: State.roundSetAside,
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
       singleSmallThreshold: State.singleSmallThreshold,
@@ -1618,6 +1656,7 @@ const Sync = {
       localStorage.setItem(STORE.dueSoonCatsOff, JSON.stringify([...State.dueSoonCatsOff]));
     }
     if (typeof p.yearViewEnabled === 'boolean') { State.setYearViewEnabled(p.yearViewEnabled); }
+    if (typeof p.roundSetAside === 'boolean') { State.setRoundSetAside(p.roundSetAside); }
     if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
     if (typeof p.singleSmallMonthly === 'boolean') { State.setSingleSmallMonthly(p.singleSmallMonthly); }
     if (typeof p.singleSmallThreshold === 'number') { State.setSingleSmallThreshold(p.singleSmallThreshold); }
@@ -3161,6 +3200,10 @@ route('settings', (root) => {
           <input id="year-view-enable" type="checkbox" ${State.yearViewEnabled ? 'checked' : ''} style="width:auto;" />
           <label for="year-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show 12-month year view on Dashboard</label>
         </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="round-set-aside" type="checkbox" ${State.roundSetAside ? 'checked' : ''} style="width:auto;" />
+          <label for="round-set-aside" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Round set-aside amounts to the nearest $1</label>
+        </div>
       </div>
       <div class="card">
         <h2>Appearance</h2>
@@ -3449,6 +3492,8 @@ route('settings', (root) => {
   });
   const yearViewEl = $('#year-view-enable');
   if (yearViewEl) yearViewEl.onchange = (e) => { State.setYearViewEnabled(e.target.checked); };
+  const roundEl = $('#round-set-aside');
+  if (roundEl) roundEl.onchange = (e) => { State.setRoundSetAside(e.target.checked); navigate(); };
 
   const getCreds = () => ({
     email: ($('#sync-email')?.value || '').trim(),
@@ -3571,7 +3616,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
