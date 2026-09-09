@@ -2030,7 +2030,8 @@ route('dashboard', (root) => {
   const canBack = targetIdx > 0;
   const canFwd = targetIdx < perPaycheck.length - 1;
 
-  const monthlyTotal = State.bills.filter((b) => b.amount > 0).reduce((s, b) => s + Number(b.amount), 0);
+  const activeBillsForMonthly = State.bills.filter((b) => !b.archived && Number(b.amount) > 0);
+  const monthlyTotal = activeBillsForMonthly.reduce((s, b) => s + monthlyEquivFor(b), 0);
   // Average uses the next 26 pay dates from today (one year for biweekly).
   const avgWindow = perPaycheck.slice(nextIdx, nextIdx + 26);
   const totalAvgWindow = avgWindow.reduce((s, p) => s + p.total, 0);
@@ -2103,7 +2104,7 @@ route('dashboard', (root) => {
       <div class="card">
         <div class="label">Total monthly</div>
         <div class="value">${fmtUSD.format(monthlyTotal)}</div>
-        <div class="hint">${State.bills.length} bill${State.bills.length === 1 ? '' : 's'}</div>
+        <div class="hint">${activeBillsForMonthly.length} bill${activeBillsForMonthly.length === 1 ? '' : 's'}</div>
       </div>
       <div class="card">
         <div class="label">Avg per paycheck</div>
@@ -2400,6 +2401,16 @@ function dueSoonChipHtml(info) {
   if (!info || !info.soon) return '';
   const label = info.days === 0 ? 'due today' : info.days === 1 ? 'due tomorrow' : `due in ${info.days}d`;
   return `<span class="badge due-soon-badge">${label}</span>`;
+}
+
+// Monthly-equivalent for a bill (weekly / N-weekly / N-monthly normalized to per month).
+function monthlyEquivFor(b) {
+  const amt = Number(b.amount) || 0;
+  if (!amt) return 0;
+  const rec = b.recurrence || 'monthly';
+  if (rec === 'everyNWeeks') return amt * (30 / (7 * Math.max(1, Number(b.intervalWeeks) || 1)));
+  if (rec === 'everyNMonths') return amt / Math.max(1, Number(b.intervalMonths) || 1);
+  return amt; // monthly day-of-month
 }
 
 // Payment-shape optimizer: pick the shape per category that maximizes
@@ -2737,18 +2748,9 @@ async function runOptimizeShapes() {
 }
 
 route('bills', (root) => {
-  // Monthly-equivalent for a bill (weekly / N-weekly / N-monthly normalized to per month).
-  const monthlyEquiv = (b) => {
-    const amt = Number(b.amount) || 0;
-    if (!amt) return 0;
-    const rec = b.recurrence || 'monthly';
-    if (rec === 'everyNWeeks') return amt * (30 / (7 * Math.max(1, Number(b.intervalWeeks) || 1)));
-    if (rec === 'everyNMonths') return amt / Math.max(1, Number(b.intervalMonths) || 1);
-    return amt; // monthly day-of-month
-  };
   const showArchNow = sessionStorage.getItem('bills.showArch') === '1';
   const activeForTotal = State.bills.filter((b) => !b.archived && Number(b.amount) > 0);
-  const monthlyTotal = activeForTotal.reduce((s, b) => s + monthlyEquiv(b), 0);
+  const monthlyTotal = activeForTotal.reduce((s, b) => s + monthlyEquivFor(b), 0);
   const billCount = activeForTotal.length;
 
   root.innerHTML = `
@@ -3569,7 +3571,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v50 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v51 · ledger edition</p>
       </div>
     </div>
 
