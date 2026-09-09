@@ -1034,8 +1034,19 @@ function computeAllocations(bills, payDates, opts = {}) {
         perPay = 0;
       } else if (shape === 'single-cycle' && cycleCount > 1) {
         perPay = isLastVisibleInCycle ? baseAmount : 0;
+      } else if (shape === 'first-cycle' && cycleCount > 1) {
+        perPay = (payIdxInCycle === 1) ? baseAmount : 0;
       } else if (shape === 'first-two-of-three' && cycleCount === 3) {
         perPay = (payIdxInCycle === 3) ? 0 : baseAmount / 2;
+      } else if (shape === 'last-two-of-three' && cycleCount === 3) {
+        perPay = (payIdxInCycle === 1) ? 0 : baseAmount / 2;
+      } else if (shape === 'bi-monthly-rate') {
+        // Bill listed as a monthly amount but actually charges every other cycle.
+        // Set aside half the per-cycle amount so two cycles accumulate one bill.
+        perPay = baseAmount / (cycleCount * 2);
+      } else if (shape === 'weighted-spread') {
+        // Placeholder; redistributed post-process based on other-bill loads.
+        perPay = baseAmount / cycleCount;
       } else {
         // Spread evenly (default) — with optional global fallback for small monthly bills
         const singleSmall = shape === 'spread'
@@ -1066,6 +1077,38 @@ function computeAllocations(bills, payDates, opts = {}) {
   if (typeof State !== 'undefined' && State.catShape) {
     const monthlyRateCats = new Set(Object.entries(State.catShape).filter(([_, v]) => v === 'monthly-rate').map(([k]) => k));
     if (monthlyRateCats.size) batchMonthlyRateCats(perPaycheck, bills, monthlyRateCats);
+    const weightedCats = new Set(Object.entries(State.catShape).filter(([_, v]) => v === 'weighted-spread').map(([k]) => k));
+    if (weightedCats.size) {
+      // Redistribute weighted-spread bills inversely to other-bill per-pay loads within each cycle.
+      for (const bill of bills) {
+        if (!bill || bill.archived || !(bill.amount > 0)) continue;
+        const cat = (bill.category || '').trim().toLowerCase();
+        if (!weightedCats.has(cat)) continue;
+        // Group this bill's items by cycle (dueDate key)
+        const cycles = new Map();
+        perPaycheck.forEach((p, idx) => {
+          const it = p.items.find((x) => x.billId === bill.id);
+          if (!it) return;
+          const key = toISO(it.dueDate);
+          if (!cycles.has(key)) cycles.set(key, []);
+          cycles.get(key).push({ idx, item: it });
+        });
+        cycles.forEach((entries) => {
+          const cycleTotal = entries.reduce((s, e) => s + e.item.amount, 0);
+          if (cycleTotal <= 0) return;
+          const otherLoads = entries.map((e) => perPaycheck[e.idx].total - e.item.amount);
+          const maxLoad = Math.max(...otherLoads, 0);
+          const weights = otherLoads.map((l) => (maxLoad - l + 1));
+          const wSum = weights.reduce((s, v) => s + v, 0) || 1;
+          entries.forEach((e, k) => {
+            const oldAmt = e.item.amount;
+            const newAmt = cycleTotal * (weights[k] / wSum);
+            perPaycheck[e.idx].total += (newAmt - oldAmt);
+            e.item.amount = newAmt;
+          });
+        });
+      }
+    }
   }
   return { perPaycheck, byBill };
 }
@@ -2092,7 +2135,7 @@ function dueSoonChipHtml(info) {
 // Payment-shape optimizer: pick the shape per category that maximizes
 // the smallest per-pay leftover across the next N pays.
 async function optimizeShapes(nPays = 26, onProgress) {
-  const shapes = ['spread', 'single-cycle', 'first-two-of-three', 'monthly-rate'];
+  const shapes = ['spread', 'weighted-spread', 'single-cycle', 'first-cycle', 'first-two-of-three', 'last-two-of-three', 'bi-monthly-rate', 'monthly-rate'];
   const yieldNow = () => new Promise((r) => setTimeout(r, 0));
   const catFor = (b) => ((b.category || '').trim() || 'Uncategorized');
 
@@ -2126,13 +2169,34 @@ async function optimizeShapes(nPays = 26, onProgress) {
     State.catShape = next;
     const { perPaycheck } = computeAllocations(State.bills, payDates);
     const leftovers = perPaycheck.map((p) => incomeFor(p.payDate) - p.total);
+    const n = leftovers.length;
     const min = Math.min(...leftovers);
     const sum = leftovers.reduce((s, v) => s + v, 0);
-    const avg = sum / leftovers.length;
-    return { min, avg, sum, leftovers };
+    const avg = sum / n;
+    // Volatility: population stdev of leftovers (lower is smoother)
+    let variance = 0;
+    for (const v of leftovers) variance += (v - avg) * (v - avg);
+    const stdev = Math.sqrt(variance / n);
+    // Consecutive-tight count: adjacent pairs where both are in the bottom quartile
+    const sorted = leftovers.slice().sort((a, b) => a - b);
+    const q1 = sorted[Math.floor(n * 0.25)] ?? sorted[0];
+    let consecTight = 0;
+    for (let i = 1; i < n; i++) if (leftovers[i - 1] <= q1 && leftovers[i] <= q1) consecTight++;
+    return { min, avg, sum, stdev, consecTight, leftovers };
   };
 
-  const cmp = (a, b) => (a.min - b.min) || (a.avg - b.avg);
+  // Scoring order (each next tier is a tiebreaker within an epsilon of the prior):
+  // 1. Highest min leftover
+  // 2. Highest average leftover
+  // 3. Lowest volatility (stdev)
+  // 4. Fewest consecutive-tight pay pairs
+  const EPS = 0.005; // half a cent
+  const cmp = (a, b) => {
+    if (Math.abs(a.min - b.min) > EPS) return a.min - b.min;
+    if (Math.abs(a.avg - b.avg) > EPS) return a.avg - b.avg;
+    if (Math.abs(a.stdev - b.stdev) > EPS) return b.stdev - a.stdev; // lower is better
+    return b.consecTight - a.consecTight; // fewer is better
+  };
 
   // Baseline (current settings)
   const currentCombo = {};
@@ -2216,8 +2280,12 @@ async function optimizeShapes(nPays = 26, onProgress) {
 
 const SHAPE_LABELS = {
   'spread': 'Spread evenly',
-  'single-cycle': 'Once per cycle',
+  'weighted-spread': 'Weighted spread',
+  'single-cycle': 'Once per cycle (last)',
+  'first-cycle': 'Once per cycle (first)',
   'first-two-of-three': 'First-two-of-three',
+  'last-two-of-three': 'Last-two-of-three',
+  'bi-monthly-rate': 'Bi-monthly rate',
   'monthly-rate': 'Monthly rate'
 };
 
@@ -2293,7 +2361,7 @@ async function runOptimizeShapes() {
       <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:12px;">
         Analyzed ${r.cats.length} categor${r.cats.length === 1 ? 'y' : 'ies'} across the next ${r.nPays} pays via ${r.method}${r.combosTried ? ` (${r.combosTried.toLocaleString()} combos)` : ''}.
       </div>
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px;">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
         <div class="card" style="padding:10px;">
           <div class="label" style="font-size:11px;">Smallest leftover / pay</div>
           <div class="value" style="font-size:16px;">${fmtUSD.format(r.current.min)} → <b style="color:var(--good);">${fmtUSD.format(r.best.min)}</b></div>
@@ -2303,6 +2371,18 @@ async function runOptimizeShapes() {
           <div class="label" style="font-size:11px;">Average leftover / pay</div>
           <div class="value" style="font-size:16px;">${fmtUSD.format(r.current.avg)} → <b>${fmtUSD.format(r.best.avg)}</b></div>
           <div class="hint" style="font-size:11px; color:${gainAvg >= 0 ? 'var(--good)' : 'var(--danger)'};">${fmtSign(gainAvg)}</div>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px;">
+        <div class="card" style="padding:10px;">
+          <div class="label" style="font-size:11px;">Volatility (stdev)</div>
+          <div class="value" style="font-size:14px;">${fmtUSD.format(r.current.stdev)} → <b>${fmtUSD.format(r.best.stdev)}</b></div>
+          <div class="hint" style="font-size:11px; color:${r.best.stdev <= r.current.stdev ? 'var(--good)' : 'var(--danger)'};">lower = smoother pays</div>
+        </div>
+        <div class="card" style="padding:10px;">
+          <div class="label" style="font-size:11px;">Back-to-back tight pays</div>
+          <div class="value" style="font-size:14px;">${r.current.consecTight} → <b>${r.best.consecTight}</b></div>
+          <div class="hint" style="font-size:11px; color:${r.best.consecTight <= r.current.consecTight ? 'var(--good)' : 'var(--danger)'};">bottom-quartile adjacent pairs</div>
         </div>
       </div>
       ${anyChange ? `
@@ -3022,10 +3102,14 @@ route('settings', (root) => {
           for (const k of flagged) { if (!seen.has(k)) { seen.add(k); list.push(k.replace(/\b\w/g, (m) => m.toUpperCase())); } }
           if (!list.length) return `<div class="hint" style="font-size:12px;">Add bills with categories to configure this.</div>`;
           const shapes = [
-            ['spread',             'Spread evenly'],
-            ['single-cycle',       'Once per cycle (last pay)'],
-            ['first-two-of-three', 'First-two-of-three'],
-            ['monthly-rate',       'Monthly rate, first pay of month']
+            ['spread',              'Spread evenly'],
+            ['weighted-spread',     'Weighted spread (smooths peaks)'],
+            ['single-cycle',        'Once per cycle (last pay)'],
+            ['first-cycle',         'Once per cycle (first pay)'],
+            ['first-two-of-three',  'First-two-of-three'],
+            ['last-two-of-three',   'Last-two-of-three'],
+            ['bi-monthly-rate',     'Bi-monthly rate (charges every other cycle)'],
+            ['monthly-rate',        'Monthly rate, first pay of month']
           ];
           return list.map((cat) => `
             <div style="margin-top:6px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
