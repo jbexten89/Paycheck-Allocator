@@ -2087,6 +2087,178 @@ function dueSoonChipHtml(info) {
   return `<span class="badge due-soon-badge">${label}</span>`;
 }
 
+// Payment-shape optimizer: pick the shape per category that maximizes
+// the smallest per-pay leftover across the next N pays.
+function optimizeShapes(nPays = 26) {
+  const shapes = ['spread', 'single-cycle', 'first-two-of-three', 'monthly-rate'];
+  const catFor = (b) => ((b.category || '').trim() || 'Uncategorized');
+
+  // Categories that actually have active, positive bills — those are the levers.
+  const catSet = new Map(); // display name -> lowercase key
+  for (const b of State.bills) {
+    if (b.archived || !(Number(b.amount) > 0)) continue;
+    const c = catFor(b);
+    if (!catSet.has(c)) catSet.set(c, c.toLowerCase());
+  }
+  const cats = [...catSet.keys()];
+  if (!cats.length || !State.incomes || !State.incomes.some((i) => Number(i.amount) > 0)) {
+    return { error: 'Need at least one income and one active bill.' };
+  }
+
+  const timeline = State.mergedPayTimeline(nPays);
+  const payDates = timeline.map((t) => t.payDate);
+  const incomeMap = new Map(timeline.map((t) => [toISO(t.payDate), t.amount]));
+  const incomeFor = (d) => incomeMap.get(toISO(d)) || 0;
+
+  const originalShape = { ...State.catShape };
+
+  const evalCombo = (combo) => {
+    // Rebuild catShape: keep untouched entries, override for cats in play
+    const next = { ...originalShape };
+    for (const cat of cats) {
+      const k = catSet.get(cat);
+      const s = combo[cat];
+      if (!s || s === 'spread') delete next[k]; else next[k] = s;
+    }
+    State.catShape = next;
+    const { perPaycheck } = computeAllocations(State.bills, payDates);
+    const leftovers = perPaycheck.map((p) => incomeFor(p.payDate) - p.total);
+    const min = Math.min(...leftovers);
+    const sum = leftovers.reduce((s, v) => s + v, 0);
+    const avg = sum / leftovers.length;
+    return { min, avg, sum, leftovers };
+  };
+
+  const cmp = (a, b) => (a.min - b.min) || (a.avg - b.avg);
+
+  // Baseline (current settings)
+  const currentCombo = {};
+  for (const cat of cats) currentCombo[cat] = State.getCatShape(cat);
+  const currentResult = evalCombo(currentCombo);
+
+  let best = { combo: { ...currentCombo }, result: currentResult };
+  const N = cats.length;
+  const totalCombos = Math.pow(shapes.length, N);
+  const CAP = 20000;
+
+  if (totalCombos <= CAP) {
+    // Exhaustive brute force
+    const enumerate = (i, acc) => {
+      if (i === N) {
+        const r = evalCombo(acc);
+        if (cmp(r, best.result) > 0) best = { combo: { ...acc }, result: r };
+        return;
+      }
+      for (const s of shapes) { acc[cats[i]] = s; enumerate(i + 1, acc); }
+    };
+    enumerate(0, {});
+  } else {
+    // Greedy hill-climb from current
+    let improved = true;
+    while (improved) {
+      improved = false;
+      for (const cat of cats) {
+        const orig = best.combo[cat];
+        for (const s of shapes) {
+          if (s === orig) continue;
+          const trial = { ...best.combo, [cat]: s };
+          const r = evalCombo(trial);
+          if (cmp(r, best.result) > 0) { best = { combo: trial, result: r }; improved = true; }
+        }
+      }
+    }
+  }
+
+  // Restore original before returning
+  State.catShape = originalShape;
+
+  const changes = cats.map((cat) => ({
+    cat,
+    from: currentCombo[cat],
+    to: best.combo[cat],
+    changed: currentCombo[cat] !== best.combo[cat]
+  }));
+
+  return {
+    cats, changes,
+    current: currentResult,
+    best: best.result,
+    combo: best.combo,
+    method: totalCombos <= CAP ? 'exhaustive' : 'greedy',
+    combosTried: totalCombos <= CAP ? totalCombos : null,
+    nPays
+  };
+}
+
+const SHAPE_LABELS = {
+  'spread': 'Spread evenly',
+  'single-cycle': 'Once per cycle',
+  'first-two-of-three': 'First-two-of-three',
+  'monthly-rate': 'Monthly rate'
+};
+
+function runOptimizeShapes() {
+  const r = optimizeShapes(26);
+  if (r.error) { alert(r.error); return; }
+  const anyChange = r.changes.some((c) => c.changed);
+  const gainMin = r.best.min - r.current.min;
+  const gainAvg = r.best.avg - r.current.avg;
+  const fmtSign = (n) => (n >= 0 ? '+' : '−') + fmtUSD.format(Math.abs(n));
+  const worstIdx = r.best.leftovers.indexOf(Math.min(...r.best.leftovers));
+
+  openModal(`
+    <div class="modal-header">
+      <h3>Optimize payment shapes</h3>
+      <button class="btn btn-ghost" data-x="close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:12px;">
+        Analyzed ${r.cats.length} categor${r.cats.length === 1 ? 'y' : 'ies'} across the next ${r.nPays} pays via ${r.method}${r.combosTried ? ` (${r.combosTried.toLocaleString()} combos)` : ''}.
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px;">
+        <div class="card" style="padding:10px;">
+          <div class="label" style="font-size:11px;">Smallest leftover / pay</div>
+          <div class="value" style="font-size:16px;">${fmtUSD.format(r.current.min)} → <b style="color:var(--good);">${fmtUSD.format(r.best.min)}</b></div>
+          <div class="hint" style="font-size:11px; color:${gainMin >= 0 ? 'var(--good)' : 'var(--danger)'};">${fmtSign(gainMin)}</div>
+        </div>
+        <div class="card" style="padding:10px;">
+          <div class="label" style="font-size:11px;">Average leftover / pay</div>
+          <div class="value" style="font-size:16px;">${fmtUSD.format(r.current.avg)} → <b>${fmtUSD.format(r.best.avg)}</b></div>
+          <div class="hint" style="font-size:11px; color:${gainAvg >= 0 ? 'var(--good)' : 'var(--danger)'};">${fmtSign(gainAvg)}</div>
+        </div>
+      </div>
+      ${anyChange ? `
+        <div class="hint" style="font-size:12px; margin-bottom:8px;">Suggested changes:</div>
+        <table class="schedule" style="min-width:0;">
+          <thead><tr><th style="text-align:left;">Category</th><th style="text-align:left;">From</th><th style="text-align:left;">To</th></tr></thead>
+          <tbody>
+            ${r.changes.map((c) => `<tr${c.changed ? '' : ' style="opacity:0.55;"'}>
+              <td style="text-align:left;">${escapeHtml(c.cat)}</td>
+              <td style="text-align:left;">${SHAPE_LABELS[c.from] || c.from}</td>
+              <td style="text-align:left;">${c.changed ? `<b>${SHAPE_LABELS[c.to] || c.to}</b>` : SHAPE_LABELS[c.to] || c.to}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      ` : `<div class="hint" style="font-size:13px; color:var(--good);">Your current settings are already optimal for the next ${r.nPays} pays. Nothing to change.</div>`}
+    </div>
+    <div class="modal-footer">
+      <span class="spacer"></span>
+      <button class="btn" data-x="close">${anyChange ? 'Cancel' : 'Close'}</button>
+      ${anyChange ? `<button class="btn btn-primary" data-x="apply">Apply changes</button>` : ''}
+    </div>
+  `, {
+    onMount(el, close) {
+      el.querySelectorAll('[data-x="close"]').forEach((x) => x.onclick = close);
+      const apply = el.querySelector('[data-x="apply"]');
+      if (apply) apply.onclick = () => {
+        for (const c of r.changes) if (c.changed) State.setCatShape(c.cat, c.to);
+        close();
+        navigate();
+      };
+    }
+  });
+}
+
 route('bills', (root) => {
   root.innerHTML = `
     <div class="view-header">
@@ -2758,8 +2930,11 @@ route('settings', (root) => {
 
     <div class="settings-section${activeTab === 'rules' ? ' active' : ''} grid grid-2" data-tab="rules">
       <div class="card">
-        <h2>Payment shape</h2>
-        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">How each category's bills are spread across paychecks in a cycle.</div>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+          <h2 style="margin:0;">Payment shape</h2>
+          <button class="btn" id="optimize-shapes" title="Try every combination of shapes and pick the one with the biggest smallest-per-pay leftover">Optimize</button>
+        </div>
+        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin:8px 0 10px 0;">How each category's bills are spread across paychecks in a cycle.</div>
         ${(() => {
           const present = State.orderedCategories().filter((c) => c !== 'Uncategorized');
           const flagged = Object.keys(State.catShape || {});
@@ -2998,6 +3173,8 @@ route('settings', (root) => {
   $$('.cat-shape').forEach((el) => {
     el.onchange = () => { State.setCatShape(el.dataset.cat, el.value); };
   });
+  const optimizeBtn = $('#optimize-shapes');
+  if (optimizeBtn) optimizeBtn.onclick = () => runOptimizeShapes();
   const cellCreditEl = $('#cell-credit-enable');
   if (cellCreditEl) cellCreditEl.onchange = (e) => { State.setCellCreditEnabled(e.target.checked); };
   const dueSoonEnable = $('#due-soon-enable');
