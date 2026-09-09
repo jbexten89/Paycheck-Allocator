@@ -2165,7 +2165,11 @@ function dueSoonChipHtml(info) {
 // Payment-shape optimizer: pick the shape per category that maximizes
 // the smallest per-pay leftover across the next N pays.
 async function optimizeShapes(nPays = 26, onProgress) {
-  const shapes = ['spread', 'weighted-spread', 'single-cycle', 'first-cycle', 'first-two-of-three', 'last-two-of-three', 'bi-monthly-rate', 'monthly-rate'];
+  // bi-monthly-rate deliberately excluded: it structurally under-allocates for
+  // normal monthly bills (halves the set-aside), which would make leftovers look
+  // artificially high while leaving bills unfunded. Users can still select it
+  // manually when a bill genuinely charges every other cycle.
+  const shapes = ['spread', 'weighted-spread', 'single-cycle', 'first-cycle', 'first-two-of-three', 'last-two-of-three', 'monthly-rate'];
   const yieldNow = () => new Promise((r) => setTimeout(r, 0));
   const catFor = (b) => ((b.category || '').trim() || 'Uncategorized');
 
@@ -2188,6 +2192,25 @@ async function optimizeShapes(nPays = 26, onProgress) {
 
   const originalShape = { ...State.catShape };
 
+  // Compute total bill obligation per bill over the window: sum of due amounts
+  // for every occurrence whose due date falls within the pay window.
+  const windowStart = payDates[0];
+  const windowEnd = payDates[payDates.length - 1];
+  const obligationByBill = {};
+  for (const bill of State.bills) {
+    if (!bill || bill.archived || !(bill.amount > 0)) continue;
+    // Walk forward from just before windowStart, collecting dueDates <= windowEnd
+    let cursor = new Date(windowStart.getTime() - 86400000);
+    let total = 0; let guard = 0;
+    while (guard++ < 200) {
+      const { D } = nextDueCycleFor(bill, cursor);
+      if (!D || D > windowEnd) break;
+      total += Number(bill.amount) || 0;
+      cursor = D;
+    }
+    obligationByBill[bill.id] = total;
+  }
+
   const evalCombo = (combo) => {
     // Rebuild catShape: keep untouched entries, override for cats in play
     const next = { ...originalShape };
@@ -2198,6 +2221,20 @@ async function optimizeShapes(nPays = 26, onProgress) {
     }
     State.catShape = next;
     const { perPaycheck } = computeAllocations(State.bills, payDates);
+    // Safety net: reject combos that don't cover each bill's window obligation.
+    // Allow a small tolerance (0.5%) for float / month-partial edge cases.
+    const setAsideByBill = {};
+    for (const p of perPaycheck) {
+      for (const it of p.items) {
+        setAsideByBill[it.billId] = (setAsideByBill[it.billId] || 0) + it.amount;
+      }
+    }
+    for (const id of Object.keys(obligationByBill)) {
+      const need = obligationByBill[id];
+      if (need <= 0) continue;
+      const got = setAsideByBill[id] || 0;
+      if (got < need * 0.995) return { rejected: true };
+    }
     const leftovers = perPaycheck.map((p) => incomeFor(p.payDate) - p.total);
     const n = leftovers.length;
     const min = Math.min(...leftovers);
@@ -2222,6 +2259,10 @@ async function optimizeShapes(nPays = 26, onProgress) {
   // 4. Fewest consecutive-tight pay pairs
   const EPS = 0.005; // half a cent
   const cmp = (a, b) => {
+    // Rejected combos never win against a valid one
+    if (a.rejected && b.rejected) return 0;
+    if (a.rejected) return -1;
+    if (b.rejected) return 1;
     if (Math.abs(a.min - b.min) > EPS) return a.min - b.min;
     if (Math.abs(a.avg - b.avg) > EPS) return a.avg - b.avg;
     if (Math.abs(a.stdev - b.stdev) > EPS) return b.stdev - a.stdev; // lower is better
