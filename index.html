@@ -814,7 +814,6 @@ const STORE = {
   catShapePrev: 'paycheck_allocator.cat_shape_prev',
   catShapePrevAt: 'paycheck_allocator.cat_shape_prev_at',
   roundSetAside: 'paycheck_allocator.round_set_aside',
-  paidCycles: 'paycheck_allocator.paid_cycles',
   optimizeShapes: 'paycheck_allocator.optimize_shapes'
 };
 
@@ -1059,10 +1058,6 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
       if (cycleCount === 0) continue;
 
-      // Skip allocation entirely if this cycle has been marked paid.
-      if (typeof State !== 'undefined' && State.isCyclePaid && State.isCyclePaid(bill.id, D)) {
-        continue;
-      }
       // per-paycheck amount (with optional per-month credit for Cell bills)
       const cycleKey = D.getFullYear() + '-' + String(D.getMonth() + 1).padStart(2, '0');
       let cellCredit = 0;
@@ -1351,18 +1346,8 @@ const State = {
       const raw = JSON.parse(localStorage.getItem(STORE.optimizeShapes) || 'null');
       this.optimizeShapes = new Set(Array.isArray(raw) ? raw : DEFAULT_OPT_SHAPES);
     } catch { this.optimizeShapes = new Set(DEFAULT_OPT_SHAPES); }
-    try {
-      const raw = JSON.parse(localStorage.getItem(STORE.paidCycles) || '{}') || {};
-      // Prune entries whose due date is more than 60 days in the past
-      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 60); cutoff.setHours(0,0,0,0);
-      this.paidCycles = {};
-      for (const [id, list] of Object.entries(raw)) {
-        if (!Array.isArray(list)) continue;
-        const kept = list.filter((iso) => { try { return parseISO(iso) >= cutoff; } catch { return false; } });
-        if (kept.length) this.paidCycles[id] = kept;
-      }
-      localStorage.setItem(STORE.paidCycles, JSON.stringify(this.paidCycles));
-    } catch { this.paidCycles = {}; }
+    // paidCycles removed — was surface without enough value; keep localStorage tidy.
+    try { localStorage.removeItem('paycheck_allocator.paid_cycles'); } catch {}
     this.skipLastOfThree = localStorage.getItem(STORE.skipLastOfThree) === '1';
     this.singleSmallMonthly = localStorage.getItem(STORE.singleSmallMonthly) === '1';
     this.singleSmallThreshold = parseFloat(localStorage.getItem(STORE.singleSmallThreshold) || '500') || 500;
@@ -1441,12 +1426,6 @@ const State = {
   isDueSoonCat(cat) { return !this.dueSoonCatsOff.has((cat || '').toLowerCase()); },
   setYearViewEnabled(v) { this.yearViewEnabled = !!v; localStorage.setItem(STORE.yearViewEnabled, v ? '1' : '0'); },
   setRoundSetAside(v) { this.roundSetAside = !!v; localStorage.setItem(STORE.roundSetAside, v ? '1' : '0'); },
-  isCyclePaid(billId, dueDate) {
-    if (!billId || !dueDate) return false;
-    const key = typeof dueDate === 'string' ? dueDate : toISO(dueDate);
-    const list = this.paidCycles[billId];
-    return Array.isArray(list) && list.includes(key);
-  },
   setOptimizeShapeAllowed(shape, allowed) {
     if (!shape) return;
     if (allowed) this.optimizeShapes.add(shape);
@@ -1454,17 +1433,6 @@ const State = {
     // Spread is the fallback — never let the set become empty
     if (this.optimizeShapes.size === 0) this.optimizeShapes.add('spread');
     localStorage.setItem(STORE.optimizeShapes, JSON.stringify([...this.optimizeShapes]));
-  },
-  setCyclePaid(billId, dueDate, paid) {
-    if (!billId || !dueDate) return;
-    const key = typeof dueDate === 'string' ? dueDate : toISO(dueDate);
-    const list = this.paidCycles[billId] || [];
-    const has = list.includes(key);
-    if (paid && !has) list.push(key);
-    else if (!paid && has) list.splice(list.indexOf(key), 1);
-    if (list.length) this.paidCycles[billId] = list;
-    else delete this.paidCycles[billId];
-    localStorage.setItem(STORE.paidCycles, JSON.stringify(this.paidCycles));
   },
   setSkipLastOfThree(v) { this.skipLastOfThree = !!v; localStorage.setItem(STORE.skipLastOfThree, v ? '1' : '0'); },
   setSingleSmallMonthly(v) { this.singleSmallMonthly = !!v; localStorage.setItem(STORE.singleSmallMonthly, v ? '1' : '0'); },
@@ -1713,7 +1681,6 @@ const Sync = {
       dueSoonCatsOff: [...State.dueSoonCatsOff],
       yearViewEnabled: State.yearViewEnabled,
       roundSetAside: State.roundSetAside,
-      paidCycles: State.paidCycles,
       optimizeShapes: [...State.optimizeShapes],
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
@@ -1753,10 +1720,6 @@ const Sync = {
       State.optimizeShapes = new Set(p.optimizeShapes);
       if (!State.optimizeShapes.has('spread')) State.optimizeShapes.add('spread');
       localStorage.setItem(STORE.optimizeShapes, JSON.stringify([...State.optimizeShapes]));
-    }
-    if (p.paidCycles && typeof p.paidCycles === 'object') {
-      State.paidCycles = { ...p.paidCycles };
-      localStorage.setItem(STORE.paidCycles, JSON.stringify(State.paidCycles));
     }
     if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
     if (typeof p.singleSmallMonthly === 'boolean') { State.setSingleSmallMonthly(p.singleSmallMonthly); }
@@ -1891,7 +1854,6 @@ const WhatIf = {
       bills: JSON.parse(JSON.stringify(State.bills || [])),
       incomes: JSON.parse(JSON.stringify(State.incomes || [])),
       catShape: JSON.parse(JSON.stringify(State.catShape || {})),
-      paidCycles: JSON.parse(JSON.stringify(State.paidCycles || {})),
       cellCredits: JSON.parse(JSON.stringify(State.cellCredits || {})),
       singleSmallMonthly: State.singleSmallMonthly,
       singleSmallThreshold: State.singleSmallThreshold,
@@ -1910,7 +1872,6 @@ const WhatIf = {
     State.bills = s.bills; localStorage.setItem(STORE.bills, JSON.stringify(State.bills));
     State.incomes = s.incomes; localStorage.setItem(STORE.incomes, JSON.stringify(State.incomes));
     State.catShape = s.catShape; localStorage.setItem(STORE.catShape, JSON.stringify(State.catShape));
-    State.paidCycles = s.paidCycles; localStorage.setItem(STORE.paidCycles, JSON.stringify(State.paidCycles));
     State.cellCredits = s.cellCredits; localStorage.setItem(STORE.cellCredits, JSON.stringify(State.cellCredits));
     State.singleSmallMonthly = s.singleSmallMonthly; localStorage.setItem(STORE.singleSmallMonthly, s.singleSmallMonthly ? '1' : '0');
     State.singleSmallThreshold = s.singleSmallThreshold; localStorage.setItem(STORE.singleSmallThreshold, String(s.singleSmallThreshold));
@@ -3504,39 +3465,6 @@ route('settings', (root) => {
         </div>
       </div>
       <div class="card">
-        <h2>Mark bills paid this cycle</h2>
-        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">Skip a bill's set-aside for its current cycle when the money is already covered. Auto-clears after the due date passes.</div>
-        ${(() => {
-          const active = State.bills.filter((b) => !b.archived && Number(b.amount) > 0);
-          if (!active.length) return `<div class="hint" style="font-size:12px;">No active bills.</div>`;
-          const today = new Date();
-          // Group by category, use ordered categories
-          const groups = {};
-          for (const b of active) {
-            const cat = ((b.category || '').trim() || 'Uncategorized');
-            (groups[cat] ||= []).push(b);
-          }
-          const catNames = State.orderedCategories().filter((c) => groups[c]);
-          return catNames.map((cat) => {
-            const bills = State.orderedBillsInCategory(cat).filter((b) => !b.archived && Number(b.amount) > 0);
-            if (!bills.length) return '';
-            return `<div style="margin-top:10px;">
-              <div style="font-size:11px; color:var(--ink-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px;">${escapeHtml(cat)}</div>
-              ${bills.map((b) => {
-                const { D } = nextDueCycleFor(b, today);
-                const dueISO = toISO(D);
-                const paid = State.isCyclePaid(b.id, dueISO);
-                return `<label class="paid-row" style="display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:6px; cursor:pointer; ${paid ? 'opacity:0.6;' : ''}">
-                  <input type="checkbox" class="paid-cycle" data-bill="${escapeAttr(b.id)}" data-due="${dueISO}" ${paid ? 'checked' : ''} style="width:auto;" />
-                  <span style="flex:1; font-size:13px; ${paid ? 'text-decoration:line-through;' : ''}">${escapeHtml(b.name)}</span>
-                  <span style="font-size:11px; color:var(--ink-muted); font-variant-numeric:tabular-nums;">${fmtUSD.format(b.amount)} · due ${fmtDateShort.format(D)}</span>
-                </label>`;
-              }).join('')}
-            </div>`;
-          }).join('');
-        })()}
-      </div>
-      <div class="card">
         <h2>Due-soon highlight</h2>
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
           <input id="due-soon-enable" type="checkbox" ${State.dueSoonEnabled ? 'checked' : ''} style="width:auto;" />
@@ -3611,7 +3539,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v48 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v49 · ledger edition</p>
       </div>
     </div>
 
@@ -3796,18 +3724,6 @@ route('settings', (root) => {
   if (yearViewEl) yearViewEl.onchange = (e) => { State.setYearViewEnabled(e.target.checked); };
   const roundEl = $('#round-set-aside');
   if (roundEl) roundEl.onchange = (e) => { State.setRoundSetAside(e.target.checked); navigate(); };
-  $$('.paid-cycle').forEach((el) => {
-    el.onchange = () => {
-      State.setCyclePaid(el.dataset.bill, el.dataset.due, el.checked);
-      // Refresh row styling
-      const row = el.closest('.paid-row');
-      if (row) {
-        row.style.opacity = el.checked ? '0.6' : '';
-        const label = row.querySelector('span');
-        if (label) label.style.textDecoration = el.checked ? 'line-through' : '';
-      }
-    };
-  });
 
   const getCreds = () => ({
     email: ($('#sync-email')?.value || '').trim(),
@@ -3930,7 +3846,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setCyclePaid','setOptimizeShapeAllowed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
