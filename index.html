@@ -400,6 +400,28 @@
   .bill-amount { font-family: var(--sans); font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--good); }
   .badge { display: inline-block; padding: 0 6px; border-radius: 99px; font-size: 10px; background: var(--paper); border: 1px solid var(--hairline); color: var(--ink-muted); margin-left: 6px; }
   .due-soon-badge { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.55); color: var(--amber); font-weight: 600; }
+  .year-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+  @media (max-width: 640px) { .year-grid { grid-template-columns: repeat(3, 1fr); } }
+  .year-cell { border: 1px solid var(--hairline); border-radius: 10px; padding: 8px 10px; background: var(--paper-2); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .year-cell.tone-ok { border-color: rgba(34, 197, 94, 0.35); }
+  .year-cell.tone-tight { border-color: rgba(245, 158, 11, 0.45); }
+  .year-cell.tone-short { border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.05); }
+  .year-cell.tone-muted { opacity: 0.55; }
+  .ym-label { font-size: 12px; font-weight: 600; color: var(--ink); }
+  .ym-year { font-size: 10px; color: var(--ink-muted); font-weight: 400; }
+  .ym-bar { position: relative; height: 8px; border-radius: 4px; background: var(--paper); overflow: hidden; }
+  .ym-fill { height: 100%; background: var(--amber); border-radius: 4px 0 0 4px; }
+  .tone-ok .ym-fill { background: var(--good); }
+  .tone-short .ym-fill { background: var(--danger); }
+  .ym-over { position: absolute; right: 0; top: 0; height: 100%; background: var(--danger); border-radius: 0 4px 4px 0; opacity: 0.85; }
+  .ym-diff { font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .ym-diff.ok { color: var(--good); }
+  .ym-diff.short { color: var(--danger); }
+  .ym-diff.muted { color: var(--ink-muted); font-weight: 400; }
+  .ym-meta { font-size: 10px; color: var(--ink-muted); }
+  .year-total { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline); font-size: 13px; font-weight: 600; color: var(--good); }
+  .year-total.short { color: var(--danger); }
+  .year-total-meta { display: block; font-size: 11px; color: var(--ink-muted); font-weight: 400; margin-top: 2px; }
   .bill-row.due-soon { background: linear-gradient(90deg, rgba(245, 158, 11, 0.10), rgba(245, 158, 11, 0.02) 60%, transparent); box-shadow: inset 3px 0 0 var(--amber); }
   tr.due-soon > td { background: rgba(245, 158, 11, 0.09); box-shadow: inset 3px 0 0 var(--amber); }
   .delete-btn { padding: 2px 8px !important; font-size: 12px !important; }
@@ -1854,6 +1876,67 @@ route('dashboard', (root) => {
                   <tr class="sched-grand-total"><td>Total</td><td>${totalPays}</td><td class="total"${totalShort ? ' style="color:var(--danger);"' : ''}>${fmtUSD.format(Math.abs(totalLeft))}${totalShort ? ' short' : ''}</td></tr>
                 </tbody>
               </table>
+            </div></div>`;
+          })()
+        : ''
+    }
+
+    ${
+      (State.incomes && State.incomes.some((i) => Number(i.amount) > 0))
+        ? (() => {
+            // 12-month view of set-aside vs income for each calendar month.
+            const today0 = new Date(); today0.setHours(0,0,0,0);
+            const startIdx = perPaycheck.findIndex((p) => p.payDate >= today0);
+            const from = startIdx === -1 ? 0 : startIdx;
+            const window = perPaycheck.slice(from, from + 52);
+            const byMonth = new Map();
+            const yearStart = new Date(today0.getFullYear(), today0.getMonth(), 1);
+            for (let i = 0; i < 12; i++) {
+              const d = new Date(yearStart.getFullYear(), yearStart.getMonth() + i, 1);
+              const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+              byMonth.set(key, {
+                label: d.toLocaleDateString('en-US', { month: 'short' }),
+                yearShort: String(d.getFullYear()).slice(-2),
+                income: 0, setAside: 0, pays: 0
+              });
+            }
+            for (const p of window) {
+              const key = p.payDate.getFullYear() + '-' + String(p.payDate.getMonth() + 1).padStart(2, '0');
+              const m = byMonth.get(key);
+              if (!m) continue;
+              m.income += payAmountAt(p.payDate);
+              m.setAside += p.total;
+              m.pays += 1;
+            }
+            const cells = [...byMonth.values()];
+            const totalIncome = cells.reduce((s, m) => s + m.income, 0);
+            const totalSetAside = cells.reduce((s, m) => s + m.setAside, 0);
+            const totalDiff = totalIncome - totalSetAside;
+            return `<div style="margin-bottom:16px;"><div class="card">
+              <h2 class="accent">Year view · next 12 months</h2>
+              <div class="year-grid">
+                ${cells.map((m) => {
+                  const hasData = m.pays > 0;
+                  const pct = hasData && m.income > 0 ? Math.min(100, (m.setAside / m.income) * 100) : 0;
+                  const over = hasData && m.setAside > m.income;
+                  const overPct = over ? Math.min(100, ((m.setAside - m.income) / m.income) * 100) : 0;
+                  const diff = m.income - m.setAside;
+                  const tone = !hasData ? 'muted' : over ? 'short' : (pct >= 90 ? 'tight' : 'ok');
+                  return `<div class="year-cell tone-${tone}">
+                    <div class="ym-label">${m.label} <span class="ym-year">'${m.yearShort}</span></div>
+                    <div class="ym-bar">
+                      <div class="ym-fill" style="width:${pct.toFixed(1)}%"></div>
+                      ${over ? `<div class="ym-over" style="width:${overPct.toFixed(1)}%"></div>` : ''}
+                    </div>
+                    <div class="ym-diff ${over ? 'short' : (hasData ? 'ok' : 'muted')}">${hasData ? (over ? fmtUSD.format(-diff) + ' short' : fmtUSD.format(diff) + ' left') : '—'}</div>
+                    <div class="ym-meta">${hasData ? m.pays + ' pay' + (m.pays === 1 ? '' : 's') : ''}</div>
+                  </div>`;
+                }).join('')}
+              </div>
+              <div class="year-total ${totalDiff < 0 ? 'short' : ''}">
+                12-month total: ${totalDiff < 0 ? fmtUSD.format(-totalDiff) + ' short' : fmtUSD.format(totalDiff) + ' left'}
+                <span class="year-total-meta">(income ${fmtUSD.format(totalIncome)} · set aside ${fmtUSD.format(totalSetAside)})</span>
+              </div>
             </div></div>`;
           })()
         : ''
