@@ -1096,15 +1096,32 @@ function computeAllocations(bills, payDates, opts = {}) {
           cycles.get(key).push({ idx, item: it });
         });
         cycles.forEach((entries) => {
+          const n = entries.length;
           const cycleTotal = entries.reduce((s, e) => s + e.item.amount, 0);
-          if (cycleTotal <= 0) return;
+          if (cycleTotal <= 0 || n === 0) return;
+          if (n === 1) return; // nothing to redistribute
           const otherLoads = entries.map((e) => perPaycheck[e.idx].total - e.item.amount);
+          // Guarantee each pay gets at least FLOOR share of the equal split;
+          // redistribute only the remainder by inverse-load weight so no pay
+          // ends up with a rounding-error sliver.
+          const FLOOR = 0.25; // 25% of equal share
+          const equalShare = cycleTotal / n;
+          const floorAmt = equalShare * FLOOR;
+          const remaining = cycleTotal - floorAmt * n; // == cycleTotal * (1 - FLOOR)
           const maxLoad = Math.max(...otherLoads, 0);
           const weights = otherLoads.map((l) => (maxLoad - l + 1));
           const wSum = weights.reduce((s, v) => s + v, 0) || 1;
+          const raw = entries.map((_, k) => floorAmt + remaining * (weights[k] / wSum));
+          // Round to nearest cent and reconcile any drift with the max share
+          const rounded = raw.map((v) => Math.round(v * 100) / 100);
+          const drift = Math.round((cycleTotal - rounded.reduce((s, v) => s + v, 0)) * 100) / 100;
+          if (drift !== 0) {
+            const maxIdx = rounded.indexOf(Math.max(...rounded));
+            rounded[maxIdx] = Math.round((rounded[maxIdx] + drift) * 100) / 100;
+          }
           entries.forEach((e, k) => {
             const oldAmt = e.item.amount;
-            const newAmt = cycleTotal * (weights[k] / wSum);
+            const newAmt = rounded[k];
             perPaycheck[e.idx].total += (newAmt - oldAmt);
             e.item.amount = newAmt;
           });
