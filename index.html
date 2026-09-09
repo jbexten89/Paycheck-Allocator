@@ -766,7 +766,8 @@ const STORE = {
   incomes: 'paycheck_allocator.incomes',
   dueSoonEnabled: 'paycheck_allocator.due_soon_enabled',
   dueSoonDays: 'paycheck_allocator.due_soon_days',
-  dueSoonCatsOff: 'paycheck_allocator.due_soon_cats_off'
+  dueSoonCatsOff: 'paycheck_allocator.due_soon_cats_off',
+  yearViewEnabled: 'paycheck_allocator.year_view_enabled'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1196,6 +1197,7 @@ const State = {
     { const n = parseInt(localStorage.getItem(STORE.dueSoonDays) || '5', 10); this.dueSoonDays = Number.isFinite(n) && n > 0 ? n : 5; }
     try { this.dueSoonCatsOff = new Set(JSON.parse(localStorage.getItem(STORE.dueSoonCatsOff) || '[]').map((s) => String(s).toLowerCase())); }
     catch { this.dueSoonCatsOff = new Set(); }
+    this.yearViewEnabled = localStorage.getItem(STORE.yearViewEnabled) !== '0';
     this.skipLastOfThree = localStorage.getItem(STORE.skipLastOfThree) === '1';
     this.singleSmallMonthly = localStorage.getItem(STORE.singleSmallMonthly) === '1';
     this.singleSmallThreshold = parseFloat(localStorage.getItem(STORE.singleSmallThreshold) || '500') || 500;
@@ -1269,6 +1271,7 @@ const State = {
     localStorage.setItem(STORE.dueSoonCatsOff, JSON.stringify([...this.dueSoonCatsOff]));
   },
   isDueSoonCat(cat) { return !this.dueSoonCatsOff.has((cat || '').toLowerCase()); },
+  setYearViewEnabled(v) { this.yearViewEnabled = !!v; localStorage.setItem(STORE.yearViewEnabled, v ? '1' : '0'); },
   setSkipLastOfThree(v) { this.skipLastOfThree = !!v; localStorage.setItem(STORE.skipLastOfThree, v ? '1' : '0'); },
   setSingleSmallMonthly(v) { this.singleSmallMonthly = !!v; localStorage.setItem(STORE.singleSmallMonthly, v ? '1' : '0'); },
   setSingleSmallThreshold(n) { this.singleSmallThreshold = n; localStorage.setItem(STORE.singleSmallThreshold, String(n)); },
@@ -1489,6 +1492,7 @@ const Sync = {
       dueSoonEnabled: State.dueSoonEnabled,
       dueSoonDays: State.dueSoonDays,
       dueSoonCatsOff: [...State.dueSoonCatsOff],
+      yearViewEnabled: State.yearViewEnabled,
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
       singleSmallThreshold: State.singleSmallThreshold,
@@ -1521,6 +1525,7 @@ const Sync = {
       State.dueSoonCatsOff = new Set(p.dueSoonCatsOff.map((s) => String(s).toLowerCase()));
       localStorage.setItem(STORE.dueSoonCatsOff, JSON.stringify([...State.dueSoonCatsOff]));
     }
+    if (typeof p.yearViewEnabled === 'boolean') { State.setYearViewEnabled(p.yearViewEnabled); }
     if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
     if (typeof p.singleSmallMonthly === 'boolean') { State.setSingleSmallMonthly(p.singleSmallMonthly); }
     if (typeof p.singleSmallThreshold === 'number') { State.setSingleSmallThreshold(p.singleSmallThreshold); }
@@ -1882,7 +1887,7 @@ route('dashboard', (root) => {
     }
 
     ${
-      (State.incomes && State.incomes.some((i) => Number(i.amount) > 0))
+      (State.yearViewEnabled && State.incomes && State.incomes.some((i) => Number(i.amount) > 0))
         ? (() => {
             // 12-month view of set-aside vs income for each calendar month.
             const today0 = new Date(); today0.setHours(0,0,0,0);
@@ -2733,6 +2738,10 @@ route('settings', (root) => {
             ${[6,12].map((n) => `<option value="${n}" ${n===State.leftoverMonths?'selected':''}>${n}</option>`).join('')}
           </select>
         </div>
+        <div style="margin-top:14px; display:flex; align-items:center; gap:10px;">
+          <input id="year-view-enable" type="checkbox" ${State.yearViewEnabled ? 'checked' : ''} style="width:auto;" />
+          <label for="year-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show 12-month year view on Dashboard</label>
+        </div>
       </div>
       <div class="card">
         <h2>Appearance</h2>
@@ -2998,6 +3007,8 @@ route('settings', (root) => {
   $$('.due-soon-cat').forEach((el) => {
     el.onchange = () => { State.setDueSoonCat(el.dataset.cat, el.checked); };
   });
+  const yearViewEl = $('#year-view-enable');
+  if (yearViewEl) yearViewEl.onchange = (e) => { State.setYearViewEnabled(e.target.checked); };
 
   const getCreds = () => ({
     email: ($('#sync-email')?.value || '').trim(),
@@ -3120,7 +3131,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
