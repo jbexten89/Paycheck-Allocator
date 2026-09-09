@@ -3352,9 +3352,9 @@ route('settings', (root) => {
       <div class="card">
         <h2>Getting started</h2>
         <ol style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
-          <li>Set your <strong>Pay start date</strong>, <strong>Frequency</strong>, and <strong>Paycheck amount</strong> in <em>General</em>.</li>
-          <li>Go to <strong>Bills</strong> and add or edit bills — the app seeds a small sample set on your first launch so you have something to explore.</li>
-          <li>Open <strong>Dashboard</strong> to see how much to set aside from your next paycheck, and the monthly leftover forecast.</li>
+          <li>Under <em>General → Income sources</em>, add one row per paycheck (yours, a spouse's, side gig). Each has its own amount, frequency, and next payday.</li>
+          <li>Go to <strong>Bills</strong> and add / edit bills. The app seeds a small sample set on first launch so you can poke around.</li>
+          <li>Open <strong>Dashboard</strong> for what to set aside from the next pay, the monthly leftover forecast, and the year view.</li>
           <li>Open <strong>Schedule</strong> for the full grid of bills across future paychecks.</li>
           <li>Optionally sign in under <em>Sync</em> to back up and sync across devices.</li>
         </ol>
@@ -3362,58 +3362,86 @@ route('settings', (root) => {
       </div>
       <div class="card">
         <h2>How allocations work</h2>
-        <p style="color:var(--ink-soft);">For each bill, the app finds the next due date after each paycheck and spreads the bill's amount across all paychecks that fall in that cycle. A paycheck landing on the due date funds the <em>next</em> cycle since the money can't clear in time.</p>
+        <p style="color:var(--ink-soft);">For each bill, the app finds the next due date after each paycheck and spreads the bill's amount across the paychecks that fall in that cycle. A paycheck landing on the due date funds the <em>next</em> cycle since the money can't clear in time.</p>
         <p style="color:var(--ink-soft);"><strong>Already saved</strong> reduces the first upcoming cycle only. Later cycles use the full amount.</p>
+        <p style="color:var(--ink-soft); font-size:13px;">With multiple incomes, pay dates from every source are merged into a single timeline — same-day pays sum. Per-pay comparisons on the dashboard use that specific pay's household income.</p>
       </div>
       <div class="card">
-        <h2>Payment shape (Rules tab)</h2>
+        <h2>Payment shapes (Rules tab)</h2>
         <p style="color:var(--ink-soft); margin-bottom:6px;">Choose how each category's bills spread across paychecks in a cycle:</p>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
-          <li><strong>Spread evenly</strong> — bill / number of paychecks in the cycle. Default.</li>
+          <li><strong>Spread evenly</strong> — bill ÷ paychecks in cycle. Default.</li>
+          <li><strong>Weighted spread</strong> — same total, but each pay gets more or less based on how loaded other bills already made that pay. Smooths peaks.</li>
           <li><strong>Once per cycle (last pay)</strong> — full amount on the last paycheck before due.</li>
-          <li><strong>First-two-of-three</strong> — for 3-pay cycles only: 50/50 on the first two, $0 on the last.</li>
+          <li><strong>Once per cycle (first pay)</strong> — full amount on the first paycheck of the cycle. Front-loads.</li>
+          <li><strong>First-two-of-three</strong> — for 3-pay cycles: 50/50 on the first two, $0 on the last.</li>
+          <li><strong>Last-two-of-three</strong> — mirror: $0 on the first, 50/50 on the last two.</li>
+          <li><strong>Bi-monthly rate</strong> — the bill is listed as a monthly amount but actually charges every OTHER cycle; set-aside is halved. (Not chosen by Optimize — pick manually only.)</li>
           <li><strong>Monthly rate, first pay of month</strong> — monthly-equivalent lump sum on the first paycheck of each calendar month.</li>
         </ul>
         <p style="color:var(--ink-soft); margin-top:8px; font-size:13px;">The <em>"Spread evenly" fallback</em> only affects categories set to Spread — under-threshold monthly bills concentrate onto the last pay.</p>
       </div>
       <div class="card">
+        <h2>Optimize button</h2>
+        <p style="color:var(--ink-soft);">The <strong>Optimize</strong> button on the Payment shape card tries every combination of shapes across your categories and picks the one with the biggest smallest-per-pay leftover, then the biggest average, then the lowest volatility, then the fewest back-to-back tight pays.</p>
+        <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li>Combos that under-fund any bill (short by more than $5 or 0.5%) are rejected.</li>
+          <li>Progress modal shows a running count and the best min leftover found so far.</li>
+          <li>Applying saves a <strong>snapshot</strong> of your prior shapes — a <strong>Revert to pre-optimize</strong> button appears next to Optimize so you can undo the change any time until you accept it.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>Rules & views</h2>
+        <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li><strong>Due-soon highlight</strong> (Rules) — highlights monthly bills coming due within N days on the Bills page and the Dashboard breakdown. Per-category checkbox list lets you silence sections (e.g. subscriptions).</li>
+          <li><strong>Year view</strong> (General → Views) — 12-month grid of set-aside vs income with a bar per month. Toggle off from Views to hide it.</li>
+          <li><strong>Round set-aside to nearest $1</strong> (General → Views) — cleaner numbers; per-bill-per-cycle totals still equal the exact bill amount.</li>
+          <li><strong>Monthly leftover view</strong> — 6 or 12 months; also switches the year view's data window.</li>
+        </ul>
+      </div>
+      <div class="card">
         <h2>Bills page</h2>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
-          <li>Tap a bill row to edit it.</li>
-          <li>Tap a category header to collapse / expand.</li>
+          <li>Tap a bill row to edit it. Tap a category header to collapse / expand.</li>
           <li>Drag the ⋮⋮ handle on a row or header to reorder within a category (or reorder categories).</li>
           <li>Tap the ✕ on a category header to delete the category and all its bills.</li>
           <li>Use <strong>Show archived</strong> to see bills you've archived.</li>
+          <li>Bills coming due within your due-soon window get an amber tint + "due in Nd" chip.</li>
         </ul>
       </div>
       <div class="card">
         <h2>Dashboard</h2>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
           <li>Use ‹ › to walk forward and back through pay periods. <strong>today</strong> returns to the current one.</li>
-          <li>Green cash-flow bars = safely under paycheck; red = over.</li>
-          <li>Monthly leftover shows net (paycheck − set aside) per calendar month. Red = the month goes short.</li>
+          <li>Cash-flow chart: bars are set-aside per pay; the small tick above each bar is that pay's household income. Bars turn red when set-aside exceeds income.</li>
+          <li><strong>Set aside</strong> card shows leftover vs short for the next pay based on that pay's income.</li>
+          <li><strong>Monthly leftover</strong> — net (income − set aside) per calendar month. Red = the month goes short.</li>
+          <li><strong>Year view</strong> — 12 tiles, one per month, colored by tightness (green / amber / red / muted).</li>
         </ul>
       </div>
       <div class="card">
         <h2>Sync & backup</h2>
         <p style="color:var(--ink-soft);">Sign in with email + password under the <em>Sync</em> tab. Sign-in happens inside the app (works on iOS home-screen installs). Changes push to Supabase automatically after ~1s. Sign in on another device with the same account to pull your data.</p>
-        <p style="color:var(--ink-soft); font-size:13px;">Regular <em>Data → Export JSON</em> gives a manual backup file.</p>
+        <p style="color:var(--ink-soft); font-size:13px;">Regular <em>Data → Export JSON</em> gives a manual backup file. The Optimize snapshot is local-only (not synced).</p>
       </div>
       <div class="card">
         <h2>Tips</h2>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
           <li>Set <strong>Show $0 bills on dashboard (grayed)</strong> to see the full bill list even when nothing's allocated that pay.</li>
           <li>Use per-month <strong>Cell credit</strong> on the Dashboard to reduce Cell's amount for a specific month (e.g. autopay discount).</li>
-          <li>Reorder pay periods with the Schedule view size in <em>General</em>: 6 / 12 / 18 / 26.</li>
+          <li>Schedule view size: 6 / 12 / 18 / 26 pay periods.</li>
           <li>Reset category drag-order with <em>Data → Reset category order</em>.</li>
+          <li>Add more income sources any time — the timeline recomputes automatically.</li>
         </ul>
       </div>
       <div class="card">
         <h2>Troubleshooting</h2>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
-          <li><strong>Iphone home-screen app looks stale after an update:</strong> close the app card in the app switcher, reopen. The service worker will fetch the newest HTML.</li>
+          <li><strong>iPhone home-screen app looks stale after an update:</strong> close the app card in the app switcher, reopen. The service worker fetches the newest HTML.</li>
           <li><strong>Sync stuck:</strong> tap <em>Sync now</em>; if that fails, check the status line and your connection.</li>
-          <li><strong>Deleted the wrong bill:</strong> if you have sync on, sign in on another device that hasn't synced yet, Export JSON, then Import back.</li>
+          <li><strong>Optimize suggests nothing:</strong> your current setup is already optimal for the analysis window.</li>
+          <li><strong>Optimize under-allocates:</strong> make sure you're on the latest version — the safety net rejects combos that don't cover each bill's obligation.</li>
+          <li><strong>Deleted the wrong bill:</strong> with sync on, another device that hasn't pulled the change yet can Export JSON, then Import back here.</li>
         </ul>
       </div>
     </div>
