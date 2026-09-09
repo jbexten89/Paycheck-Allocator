@@ -252,7 +252,11 @@
   .whatif-banner .whatif-msg { flex: 0 1 auto; min-width: 0; }
   .whatif-banner .whatif-spacer { flex: 1; }
   .whatif-banner .btn { padding: 4px 10px !important; font-size: 12px !important; }
-  body.whatif-active .view { outline: 1px dashed rgba(139, 92, 246, 0.25); outline-offset: -4px; border-radius: 12px; }
+  body.whatif-active {
+    background: linear-gradient(180deg, rgba(139, 92, 246, 0.16) 0%, rgba(139, 92, 246, 0.10) 100%), var(--paper) !important;
+  }
+  body.whatif-active .view { outline: 1px dashed rgba(139, 92, 246, 0.35); outline-offset: -4px; border-radius: 12px; }
+  html.whatif-active { background: rgba(139, 92, 246, 0.10); }
   @media (max-width: 640px) {
     .whatif-banner { flex-wrap: wrap; }
     .whatif-banner .whatif-msg { flex-basis: 100%; }
@@ -1859,6 +1863,7 @@ const WhatIf = {
   snapshot: null,
   enter() {
     if (this.active) return;
+    document.documentElement.classList.add('whatif-active');
     this.snapshot = {
       bills: JSON.parse(JSON.stringify(State.bills || [])),
       incomes: JSON.parse(JSON.stringify(State.incomes || [])),
@@ -1910,6 +1915,7 @@ const WhatIf = {
     this.active = false;
     this.snapshot = null;
     document.body.classList.remove('whatif-active');
+    document.documentElement.classList.remove('whatif-active');
   }
 };
 
