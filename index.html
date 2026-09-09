@@ -2072,6 +2072,12 @@ route('dashboard', (root) => {
               const x2 = (i * w + w * 0.86).toFixed(3);
               return `<line x1="${x1}%" x2="${x2}%" y1="${yPct}%" y2="${yPct}%" stroke="var(--ink-muted)" stroke-dasharray="2,2" stroke-width="1" opacity="0.6"/>`;
             }).join('');
+            // Average set-aside line across the window
+            const avgLine = (avg > 0 && avg <= maxVal) ? (() => {
+              const yPct = ((1 - avg / maxVal) * 100).toFixed(3);
+              return `<line x1="0" x2="100%" y1="${yPct}%" y2="${yPct}%" stroke="var(--amber)" stroke-width="1.25" opacity="0.85"/>` +
+                     `<text x="99%" y="${yPct}%" dy="-3" text-anchor="end" fill="var(--amber)" font-size="10" font-family="var(--mono)" opacity="0.9">avg ${fmtUSD.format(avg)}</text>`;
+            })() : '';
             const step = avgWindow.length > 20 ? 4 : (avgWindow.length > 10 ? 2 : 1);
             const labels = avgWindow.map((p, i) => {
               if (i !== 0 && i !== avgWindow.length - 1 && ((i + 1) % step !== 0)) return '';
@@ -2082,7 +2088,7 @@ route('dashboard', (root) => {
               <div class="card">
                 <h2 class="accent">Cash-flow forecast · next ${avgWindow.length} pays</h2>
                 <div style="position:relative; height:120px; margin-top:8px;">
-                  <svg width="100%" height="100%" preserveAspectRatio="none" style="display:block;">${bars}${payLine}</svg>
+                  <svg width="100%" height="100%" preserveAspectRatio="none" style="display:block; overflow:visible;">${bars}${payLine}${avgLine}</svg>
                 </div>
                 <div style="position:relative; height:16px; margin-top:2px;">
                   <svg width="100%" height="100%" style="display:block; overflow:visible;">${labels}</svg>
@@ -3571,7 +3577,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v51 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v52 · ledger edition</p>
       </div>
     </div>
 
