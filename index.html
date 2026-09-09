@@ -814,7 +814,8 @@ const STORE = {
   catShapePrev: 'paycheck_allocator.cat_shape_prev',
   catShapePrevAt: 'paycheck_allocator.cat_shape_prev_at',
   roundSetAside: 'paycheck_allocator.round_set_aside',
-  paidCycles: 'paycheck_allocator.paid_cycles'
+  paidCycles: 'paycheck_allocator.paid_cycles',
+  optimizeShapes: 'paycheck_allocator.optimize_shapes'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1344,6 +1345,12 @@ const State = {
     catch { this.dueSoonCatsOff = new Set(); }
     this.yearViewEnabled = localStorage.getItem(STORE.yearViewEnabled) !== '0';
     this.roundSetAside = localStorage.getItem(STORE.roundSetAside) === '1';
+    // Which shapes the Optimize button is allowed to try. Default: all except bi-monthly-rate.
+    const DEFAULT_OPT_SHAPES = ['spread','weighted-spread','single-cycle','first-cycle','first-two-of-three','last-two-of-three','monthly-rate'];
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORE.optimizeShapes) || 'null');
+      this.optimizeShapes = new Set(Array.isArray(raw) ? raw : DEFAULT_OPT_SHAPES);
+    } catch { this.optimizeShapes = new Set(DEFAULT_OPT_SHAPES); }
     try {
       const raw = JSON.parse(localStorage.getItem(STORE.paidCycles) || '{}') || {};
       // Prune entries whose due date is more than 60 days in the past
@@ -1439,6 +1446,14 @@ const State = {
     const key = typeof dueDate === 'string' ? dueDate : toISO(dueDate);
     const list = this.paidCycles[billId];
     return Array.isArray(list) && list.includes(key);
+  },
+  setOptimizeShapeAllowed(shape, allowed) {
+    if (!shape) return;
+    if (allowed) this.optimizeShapes.add(shape);
+    else this.optimizeShapes.delete(shape);
+    // Spread is the fallback — never let the set become empty
+    if (this.optimizeShapes.size === 0) this.optimizeShapes.add('spread');
+    localStorage.setItem(STORE.optimizeShapes, JSON.stringify([...this.optimizeShapes]));
   },
   setCyclePaid(billId, dueDate, paid) {
     if (!billId || !dueDate) return;
@@ -1699,6 +1714,7 @@ const Sync = {
       yearViewEnabled: State.yearViewEnabled,
       roundSetAside: State.roundSetAside,
       paidCycles: State.paidCycles,
+      optimizeShapes: [...State.optimizeShapes],
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
       singleSmallThreshold: State.singleSmallThreshold,
@@ -1733,6 +1749,11 @@ const Sync = {
     }
     if (typeof p.yearViewEnabled === 'boolean') { State.setYearViewEnabled(p.yearViewEnabled); }
     if (typeof p.roundSetAside === 'boolean') { State.setRoundSetAside(p.roundSetAside); }
+    if (Array.isArray(p.optimizeShapes)) {
+      State.optimizeShapes = new Set(p.optimizeShapes);
+      if (!State.optimizeShapes.has('spread')) State.optimizeShapes.add('spread');
+      localStorage.setItem(STORE.optimizeShapes, JSON.stringify([...State.optimizeShapes]));
+    }
     if (p.paidCycles && typeof p.paidCycles === 'object') {
       State.paidCycles = { ...p.paidCycles };
       localStorage.setItem(STORE.paidCycles, JSON.stringify(State.paidCycles));
@@ -2412,11 +2433,14 @@ function dueSoonChipHtml(info) {
 // Payment-shape optimizer: pick the shape per category that maximizes
 // the smallest per-pay leftover across the next N pays.
 async function optimizeShapes(nPays = 26, onProgress) {
-  // bi-monthly-rate deliberately excluded: it structurally under-allocates for
-  // normal monthly bills (halves the set-aside), which would make leftovers look
-  // artificially high while leaving bills unfunded. Users can still select it
-  // manually when a bill genuinely charges every other cycle.
-  const shapes = ['spread', 'weighted-spread', 'single-cycle', 'first-cycle', 'first-two-of-three', 'last-two-of-three', 'monthly-rate'];
+  // Search space = user-allowed shapes (Settings). bi-monthly-rate stays
+  // manual-only because it structurally under-allocates for normal monthly
+  // bills; the safety net would reject it anyway.
+  const allowed = State.optimizeShapes && State.optimizeShapes.size
+    ? [...State.optimizeShapes].filter((s) => s !== 'bi-monthly-rate')
+    : ['spread','weighted-spread','single-cycle','first-cycle','first-two-of-three','last-two-of-three','monthly-rate'];
+  // Ensure spread is always in the search space so a fallback exists
+  const shapes = allowed.includes('spread') ? allowed : ['spread', ...allowed];
   const yieldNow = () => new Promise((r) => setTimeout(r, 0));
   const catFor = (b) => ((b.category || '').trim() || 'Uncategorized');
 
@@ -3452,6 +3476,25 @@ route('settings', (root) => {
           `).join('');
         })()}
         <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--hairline);">
+          <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:8px;">Shapes the Optimize button may try (bi-monthly-rate is manual-only):</div>
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            ${[
+              ['spread',             'Spread evenly'],
+              ['weighted-spread',    'Weighted spread'],
+              ['single-cycle',       'Once per cycle (last)'],
+              ['first-cycle',        'Once per cycle (first)'],
+              ['first-two-of-three', 'First-two-of-three'],
+              ['last-two-of-three',  'Last-two-of-three'],
+              ['monthly-rate',       'Monthly rate']
+            ].map(([v, l]) => `
+              <label style="display:flex; align-items:center; gap:8px; margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink); cursor:pointer;">
+                <input type="checkbox" class="opt-shape-allow" data-shape="${v}" ${State.optimizeShapes.has(v) ? 'checked' : ''} ${v === 'spread' ? 'disabled title="Spread is always available as fallback"' : ''} style="width:auto;" />
+                <span>${l}${v === 'spread' ? ' <span style="color:var(--ink-muted); font-size:11px;">(always on)</span>' : ''}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--hairline);">
           <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
             <input id="single-small" type="checkbox" ${State.singleSmallMonthly ? 'checked' : ''} style="width:auto;" />
             <label for="single-small" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">"Spread evenly" fallback: monthly bills under</label>
@@ -3729,6 +3772,9 @@ route('settings', (root) => {
   });
   const optimizeBtn = $('#optimize-shapes');
   if (optimizeBtn) optimizeBtn.onclick = () => runOptimizeShapes();
+  $$('.opt-shape-allow').forEach((el) => {
+    el.onchange = () => { State.setOptimizeShapeAllowed(el.dataset.shape, el.checked); };
+  });
   const revertBtn = $('#revert-shapes');
   if (revertBtn) revertBtn.onclick = () => {
     if (!confirm('Restore payment shapes to the snapshot saved before your last Optimize?')) return;
@@ -3884,7 +3930,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setCyclePaid'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setCyclePaid','setOptimizeShapeAllowed'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
