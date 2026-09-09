@@ -2289,7 +2289,11 @@ async function optimizeShapes(nPays = 26, onProgress) {
       const need = obligationByBill[id];
       if (need <= 0) continue;
       const got = setAsideByBill[id] || 0;
-      if (got < need * 0.995) return { rejected: true };
+      // Tolerate the greater of 0.5% or $5 shortfall — dollar rounding on
+      // small / cents-billed items can accumulate a few dollars off obligation
+      // without meaningfully leaving a bill unfunded.
+      const tolerance = Math.max(need * 0.005, 5);
+      if (got < need - tolerance) return { rejected: true };
     }
     const leftovers = perPaycheck.map((p) => incomeFor(p.payDate) - p.total);
     const n = leftovers.length;
