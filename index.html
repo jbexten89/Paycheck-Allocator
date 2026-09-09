@@ -222,6 +222,23 @@
   @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--hairline); border-top-color: var(--good); animation: spin 700ms linear infinite; flex-shrink: 0; }
+  /* What-if banner + subtle app-wide tint while active */
+  .whatif-banner {
+    position: sticky; top: 0; z-index: 40;
+    background: rgba(139, 92, 246, 0.14); border-bottom: 1px solid rgba(139, 92, 246, 0.4);
+    color: var(--ink); padding: 8px 14px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; backdrop-filter: blur(6px);
+  }
+  .whatif-banner .whatif-dot { width: 8px; height: 8px; border-radius: 50%; background: #8B5CF6; box-shadow: 0 0 8px #8B5CF6; flex-shrink: 0; }
+  .whatif-banner .whatif-msg { flex: 0 1 auto; min-width: 0; }
+  .whatif-banner .whatif-spacer { flex: 1; }
+  .whatif-banner .btn { padding: 4px 10px !important; font-size: 12px !important; }
+  body.whatif-active .view { outline: 1px dashed rgba(139, 92, 246, 0.25); outline-offset: -4px; border-radius: 12px; }
+  @media (max-width: 640px) {
+    .whatif-banner { flex-wrap: wrap; }
+    .whatif-banner .whatif-msg { flex-basis: 100%; }
+  }
 
   /* Cards */
   .card {
@@ -1795,6 +1812,7 @@ const Sync = {
     } catch (e) { this.setStatus('error', e.message); }
   },
   push() {
+    if (typeof WhatIf !== 'undefined' && WhatIf.active) return;
     if (!ensureSb() || !this.user) return;
     if (!navigator.onLine) { this.setStatus('offline'); return; }
     clearTimeout(this.pushTimer);
@@ -1815,6 +1833,68 @@ const Sync = {
   }
 };
 
+/* ------------------------- What-if mode ------------------------- */
+// Freezes localStorage sync-push while active. On enter, snapshot every
+// allocation-relevant field. Apply keeps changes; Discard restores.
+const WhatIf = {
+  active: false,
+  snapshot: null,
+  enter() {
+    if (this.active) return;
+    this.snapshot = {
+      bills: JSON.parse(JSON.stringify(State.bills || [])),
+      incomes: JSON.parse(JSON.stringify(State.incomes || [])),
+      catShape: JSON.parse(JSON.stringify(State.catShape || {})),
+      paidCycles: JSON.parse(JSON.stringify(State.paidCycles || {})),
+      cellCredits: JSON.parse(JSON.stringify(State.cellCredits || {})),
+      singleSmallMonthly: State.singleSmallMonthly,
+      singleSmallThreshold: State.singleSmallThreshold,
+      cellCreditEnabled: State.cellCreditEnabled,
+      roundSetAside: State.roundSetAside,
+      payAmount: State.payAmount,
+      frequency: State.frequency,
+      payStart: State.payStart
+    };
+    this.active = true;
+    document.body.classList.add('whatif-active');
+  },
+  restore() {
+    if (!this.snapshot) return;
+    const s = this.snapshot;
+    State.bills = s.bills; localStorage.setItem(STORE.bills, JSON.stringify(State.bills));
+    State.incomes = s.incomes; localStorage.setItem(STORE.incomes, JSON.stringify(State.incomes));
+    State.catShape = s.catShape; localStorage.setItem(STORE.catShape, JSON.stringify(State.catShape));
+    State.paidCycles = s.paidCycles; localStorage.setItem(STORE.paidCycles, JSON.stringify(State.paidCycles));
+    State.cellCredits = s.cellCredits; localStorage.setItem(STORE.cellCredits, JSON.stringify(State.cellCredits));
+    State.singleSmallMonthly = s.singleSmallMonthly; localStorage.setItem(STORE.singleSmallMonthly, s.singleSmallMonthly ? '1' : '0');
+    State.singleSmallThreshold = s.singleSmallThreshold; localStorage.setItem(STORE.singleSmallThreshold, String(s.singleSmallThreshold));
+    State.cellCreditEnabled = s.cellCreditEnabled; localStorage.setItem(STORE.cellCreditEnabled, s.cellCreditEnabled ? '1' : '0');
+    State.roundSetAside = s.roundSetAside; localStorage.setItem(STORE.roundSetAside, s.roundSetAside ? '1' : '0');
+    State.payAmount = s.payAmount; localStorage.setItem(STORE.payAmount, String(s.payAmount));
+    State.frequency = s.frequency; localStorage.setItem(STORE.freq, s.frequency);
+    State.payStart = s.payStart; localStorage.setItem(STORE.payStart, s.payStart);
+    // Realign legacy sets from catShape
+    State.singlePayCats = new Set(Object.entries(State.catShape).filter(([_, v]) => v === 'single-cycle').map(([k]) => k));
+    State.batchMonthlyCats = new Set(Object.entries(State.catShape).filter(([_, v]) => v === 'monthly-rate').map(([k]) => k));
+    localStorage.setItem(STORE.singlePayCats, JSON.stringify([...State.singlePayCats]));
+    localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...State.batchMonthlyCats]));
+  },
+  discard() {
+    this.restore();
+    this.exit();
+  },
+  apply() {
+    // Nothing to do — mutations already landed. Push to Sync now that flag clears.
+    this.exit();
+    try { Sync.push(); } catch {}
+  },
+  exit() {
+    this.active = false;
+    this.snapshot = null;
+    document.body.classList.remove('whatif-active');
+  }
+};
+
 /* ------------------------- Router ------------------------- */
 const routes = {};
 function route(name, fn) { routes[name] = fn; }
@@ -1832,6 +1912,23 @@ function navigate() {
   $$('.nav a, .tabbar a').forEach((a) => a.classList.toggle('active', a.dataset.route === base));
   const main = $('#main');
   main.innerHTML = '';
+  if (WhatIf.active) {
+    const banner = document.createElement('div');
+    banner.className = 'whatif-banner';
+    banner.innerHTML = `
+      <span class="whatif-dot"></span>
+      <span class="whatif-msg"><b>What-if mode</b> — changes are not saved or synced</span>
+      <span class="whatif-spacer"></span>
+      <button class="btn" id="whatif-discard">Discard</button>
+      <button class="btn btn-primary" id="whatif-apply">Keep changes</button>
+    `;
+    main.appendChild(banner);
+    banner.querySelector('#whatif-discard').onclick = () => { WhatIf.discard(); navigate(); };
+    banner.querySelector('#whatif-apply').onclick = () => {
+      if (!confirm('Save these what-if changes for real?')) return;
+      WhatIf.apply(); navigate();
+    };
+  }
   const view = document.createElement('div');
   view.className = 'view';
   main.appendChild(view);
@@ -1904,6 +2001,7 @@ route('dashboard', (root) => {
         <h1>Dashboard</h1>
         <div class="sub">An overview of your bills and the next paycheck.</div>
       </div>
+      <button class="btn" id="whatif-enter" title="Try changes to bills or income without saving">${WhatIf.active ? 'In What-if…' : 'What if?'}</button>
     </div>
 
     ${
@@ -2208,6 +2306,12 @@ route('dashboard', (root) => {
   if (back) back.onclick = () => { if (canBack) { offset--; render(); } };
   if (fwd) fwd.onclick = () => { if (canFwd) { offset++; render(); } };
   if (todayBtn) todayBtn.onclick = () => { offset = 0; render(); };
+  const whatIfBtn = root.querySelector('#whatif-enter');
+  if (whatIfBtn) whatIfBtn.onclick = () => {
+    if (WhatIf.active) { alert('Already in What-if mode. Use the banner at the top to Keep or Discard.'); return; }
+    WhatIf.enter();
+    navigate();
+  };
   root.querySelectorAll('.cell-credit-input').forEach((inp) => {
     inp.addEventListener('change', () => {
       State.setCellCredit(inp.dataset.mkey, parseFloat(inp.value) || 0);
