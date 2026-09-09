@@ -1,5 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#0E1014"/>
-  <rect x="32" y="32" width="448" height="448" rx="80" fill="none" stroke="#3B82F6" stroke-width="6"/>
-  <text x="256" y="332" text-anchor="middle" font-family="-apple-system, Inter, Segoe UI, sans-serif" font-size="260" fill="#3B82F6" font-weight="700">$</text>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A2F3A"/>
+      <stop offset="0.55" stop-color="#151821"/>
+      <stop offset="1" stop-color="#0B0D12"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="glyph" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5A9CFF"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#tile)"/>
+  <rect width="512" height="256" rx="112" fill="url(#gloss)"/>
+  <text x="256" y="356" text-anchor="middle" font-family="-apple-system, Inter, Segoe UI, sans-serif" font-size="340" fill="url(#glyph)" font-weight="700">$</text>
 </svg>
