@@ -248,7 +248,7 @@
   .whatif-chip .whatif-dot { width: 8px; height: 8px; border-radius: 50%; background: #8B5CF6; box-shadow: 0 0 8px #8B5CF6; }
   .whatif-chip .btn { padding: 4px 10px !important; font-size: 12px !important; }
   @media (max-width: 768px) {
-    .whatif-chip { bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
+    .whatif-chip { bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
   }
   .whatif-banner .whatif-dot { width: 8px; height: 8px; border-radius: 50%; background: #8B5CF6; box-shadow: 0 0 8px #8B5CF6; flex-shrink: 0; }
   .whatif-banner .whatif-msg { flex: 0 1 auto; min-width: 0; }
@@ -658,7 +658,7 @@
     .fab {
       right: 16px;
       /* clear the ~56px mobile tab bar + safe-area inset */
-      bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+      bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     }
   }
 
@@ -711,7 +711,7 @@
   @media (max-width: 768px) {
     .app { grid-template-columns: 1fr; }
     .sidebar { display: none; }
-    main { padding: calc(20px + env(safe-area-inset-top, 0px)) 16px calc(96px + env(safe-area-inset-bottom, 0px)); }
+    main { padding: calc(20px + env(safe-area-inset-top, 0px)) 16px calc(140px + env(safe-area-inset-bottom, 0px)); }
     .tabbar {
       display: flex;
       position: fixed; bottom: 0; left: 0; right: 0;
@@ -721,13 +721,12 @@
       padding-bottom: env(safe-area-inset-bottom);
     }
     .tabbar a {
-      flex: 1; text-align: center; padding: 5px 4px;
-      color: var(--ink-muted); font-size: 10px;
+      flex: 1; text-align: center; padding: 10px 4px;
+      color: var(--ink-muted); font-size: 11px;
       letter-spacing: 0.02em; font-weight: 500;
-      line-height: 1.1;
     }
     .tabbar a.active { color: var(--amber); }
-    .tabbar a .ico { display: block; font-family: var(--sans); font-style: normal; font-size: 14px; margin-bottom: 1px; }
+    .tabbar a .ico { display: block; font-family: var(--sans); font-style: normal; font-size: 16px; margin-bottom: 2px; }
     h1 { font-size: 26px; }
     .grid-4 { grid-template-columns: 1fr 1fr; }
     .form-grid { grid-template-columns: 1fr; }
@@ -3602,7 +3601,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v57 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v56 · ledger edition</p>
       </div>
     </div>
 
