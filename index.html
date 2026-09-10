@@ -1221,6 +1221,27 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
     }
   }
+  // Rewrite payIdxInCycle / paychecksInCycle so the ratio reflects the pays
+  // actually FUNDED for that cycle (amount > 0), not raw window pays. A bill
+  // concentrated onto one pay by singleSmallMonthly / single-cycle shows 1/1.
+  for (const bill of bills) {
+    if (!bill || bill.archived || !(bill.amount > 0)) continue;
+    const byCycle = new Map();
+    for (const p of perPaycheck) {
+      const it = p.items.find((x) => x.billId === bill.id);
+      if (!it || !it.dueDate) continue;
+      const k = toISO(it.dueDate);
+      if (!byCycle.has(k)) byCycle.set(k, []);
+      byCycle.get(k).push(it);
+    }
+    byCycle.forEach((items) => {
+      const funded = items.filter((it) => it.amount > 0);
+      funded.forEach((it, idx) => {
+        it.payIdxInCycle = idx + 1;
+        it.paychecksInCycle = funded.length;
+      });
+    });
+  }
   // Optional dollar rounding — nearest $1. Runs LAST so it wins over any
   // earlier post-process (weighted-spread, monthly-rate). Per-bill-per-cycle
   // drift is absorbed into the largest share so cycle totals still equal
@@ -3625,7 +3646,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v61 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v62 · ledger edition</p>
       </div>
     </div>
 
