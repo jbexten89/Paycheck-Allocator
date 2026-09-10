@@ -456,6 +456,11 @@
   .bills-total-label { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .bills-total-amount { font-size: 18px; font-weight: 600; color: var(--good); font-variant-numeric: tabular-nums; }
   .bills-total-count { font-size: 12px; color: var(--ink-muted); margin-left: auto; }
+  /* Dashboard next-paycheck breakdown table — fit narrow phone widths */
+  table.schedule.dash-breakdown th, table.schedule.dash-breakdown td { padding-left: 4px; padding-right: 4px; }
+  table.schedule.dash-breakdown th:first-child, table.schedule.dash-breakdown td:first-child { padding-left: 8px; white-space: normal; }
+  table.schedule.dash-breakdown th:last-child, table.schedule.dash-breakdown td:last-child { padding-right: 8px; }
+  table.schedule.dash-breakdown td:nth-child(3), table.schedule.dash-breakdown th:nth-child(3) { width: 40px; }
   .year-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
   @media (max-width: 640px) { .year-grid { grid-template-columns: repeat(3, 1fr); } }
   .year-cell { border: 1px solid var(--hairline); border-radius: 10px; padding: 8px 10px; background: var(--paper-2); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -2377,7 +2382,7 @@ route('dashboard', (root) => {
                   }).join('');
                   return header + rows;
                 }).join('');
-                return `<div style="overflow-x:auto;"><table class="schedule" style="min-width:0;">
+                return `<div style="overflow-x:auto;"><table class="schedule dash-breakdown" style="min-width:0; width:100%;">
                   <thead><tr><th>Bill</th><th>Due</th><th style="text-align:center;">Pay</th><th>Allocate</th></tr></thead>
                   <tbody>
                     ${rowsHtml}
@@ -3620,7 +3625,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v60 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v61 · ledger edition</p>
       </div>
     </div>
 
