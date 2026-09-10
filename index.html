@@ -461,6 +461,9 @@
   table.schedule.dash-breakdown th:first-child, table.schedule.dash-breakdown td:first-child { padding-left: 8px; white-space: normal; }
   table.schedule.dash-breakdown th:last-child, table.schedule.dash-breakdown td:last-child { padding-right: 8px; }
   table.schedule.dash-breakdown td:nth-child(3), table.schedule.dash-breakdown th:nth-child(3) { width: 40px; }
+  .leftover-chevron { display: inline-block; width: 12px; color: var(--ink-muted); font-size: 10px; transition: none; }
+  .leftover-row:hover td { background: var(--paper); }
+  .leftover-detail td { background: var(--paper); font-size: 12px; }
   .year-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
   @media (max-width: 640px) { .year-grid { grid-template-columns: repeat(3, 1fr); } }
   .year-cell { border: 1px solid var(--hairline); border-radius: 10px; padding: 8px 10px; background: var(--paper-2); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -2231,9 +2234,12 @@ route('dashboard', (root) => {
             for (const p of window) {
               const key = p.payDate.getFullYear() + '-' + String(p.payDate.getMonth() + 1).padStart(2, '0');
               const label = p.payDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-              const cur = byMonth.get(key) || { label, leftover: 0, pays: 0 };
-              cur.leftover += (payAmountAt(p.payDate) - p.total);
+              const cur = byMonth.get(key) || { key, label, leftover: 0, pays: 0, entries: [] };
+              const inc = payAmountAt(p.payDate);
+              const leftover = inc - p.total;
+              cur.leftover += leftover;
               cur.pays += 1;
+              cur.entries.push({ payDate: p.payDate, income: inc, setAside: p.total, leftover });
               byMonth.set(key, cur);
             }
             const rows = [...byMonth.values()].slice(0, monthsToShow);
@@ -2243,13 +2249,18 @@ route('dashboard', (root) => {
             const totalPays = rows.reduce((s, r) => s + r.pays, 0);
             return `<div style="margin-bottom:16px;"><div class="card">
               <h2 class="accent">Monthly leftover · next ${rows.length} months</h2>
-              <table class="schedule" style="min-width:0;">
+              <table class="schedule leftover-table" style="min-width:0;">
                 <thead><tr><th>Month</th><th>Pays</th><th>Leftover</th></tr></thead>
                 <tbody>
-                  ${rows.map((r) => {
+                  ${rows.map((r, idx) => {
                     const short = r.leftover < 0;
                     const val = Math.abs(r.leftover);
-                    return `<tr><td>${r.label}</td><td>${r.pays}</td><td class="total"${short ? ' style="color:var(--danger);"' : ''}>${fmtUSD.format(val)}${short ? ' short' : ''}</td></tr>`;
+                    const detailRows = r.entries.map((e) => {
+                      const eShort = e.leftover < 0;
+                      const eVal = Math.abs(e.leftover);
+                      return `<tr class="leftover-detail" data-detail-for="${idx}" style="display:none;"><td style="padding-left:24px; color:var(--ink-soft);">${fmtDateShort.format(e.payDate)}</td><td style="color:var(--ink-muted); font-size:11px;">${fmtUSD.format(e.income)} − ${fmtUSD.format(e.setAside)}</td><td class="total"${eShort ? ' style="color:var(--danger);"' : ' style="color:var(--ink-soft);"'}>${fmtUSD.format(eVal)}${eShort ? ' short' : ''}</td></tr>`;
+                    }).join('');
+                    return `<tr class="leftover-row" data-lidx="${idx}" style="cursor:pointer;"><td><span class="leftover-chevron">▸</span> ${r.label}</td><td>${r.pays}</td><td class="total"${short ? ' style="color:var(--danger);"' : ''}>${fmtUSD.format(val)}${short ? ' short' : ''}</td></tr>${detailRows}`;
                   }).join('')}
                   <tr class="sched-grand-total"><td>Total</td><td>${totalPays}</td><td class="total"${totalShort ? ' style="color:var(--danger);"' : ''}>${fmtUSD.format(Math.abs(totalLeft))}${totalShort ? ' short' : ''}</td></tr>
                 </tbody>
@@ -2436,6 +2447,16 @@ route('dashboard', (root) => {
       navigate();
       requestAnimationFrame(() => window.scrollTo(0, y));
     });
+  });
+  root.querySelectorAll('.leftover-row').forEach((tr) => {
+    tr.onclick = () => {
+      const idx = tr.dataset.lidx;
+      const details = root.querySelectorAll(`.leftover-detail[data-detail-for="${idx}"]`);
+      const isOpen = details.length && details[0].style.display !== 'none';
+      details.forEach((d) => { d.style.display = isOpen ? 'none' : 'table-row'; });
+      const chev = tr.querySelector('.leftover-chevron');
+      if (chev) chev.textContent = isOpen ? '▸' : '▾';
+    };
   });
   };
   render();
@@ -3646,7 +3667,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v62 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v63 · ledger edition</p>
       </div>
     </div>
 
