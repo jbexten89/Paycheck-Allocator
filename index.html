@@ -2298,7 +2298,7 @@ route('dashboard', (root) => {
                 // Build list of bills to render.
                 let billsToRender;
                 if (State.showZeroBills) {
-                  billsToRender = State.bills.filter((b) => b.amount > 0).map((b) => ({
+                  billsToRender = State.bills.filter((b) => !b.archived && b.amount > 0).map((b) => ({
                     billId: b.id,
                     name: b.name,
                     dueDate: (itemByBillId.get(b.id) || {}).dueDate,
@@ -2306,7 +2306,8 @@ route('dashboard', (root) => {
                     category: catFor(b)
                   }));
                 } else {
-                  billsToRender = nextItems.map((it) => ({
+                  // Off: only rows with actual allocation this pay
+                  billsToRender = nextItems.filter((it) => it.amount > 0).map((it) => ({
                     billId: it.billId, name: it.name, dueDate: it.dueDate, amount: it.amount,
                     category: catFor(State.bills.find((x) => x.id === it.billId) || {})
                   }));
@@ -3600,7 +3601,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v55 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v56 · ledger edition</p>
       </div>
     </div>
 
