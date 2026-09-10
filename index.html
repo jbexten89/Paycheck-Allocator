@@ -1029,6 +1029,29 @@ function computeAllocations(bills, payDates, opts = {}) {
     let lastDueKey = null;       // used to detect crossing into a new cycle
     let payIdxInCycle = 0;       // 1-based position within current cycle
 
+    // Cell-credit rollover map — precompute per cycleKey so a credit that exceeds
+    // this month's bill carries into next month. Only for the Cell bill when enabled.
+    const isCellBill = typeof State !== 'undefined' && State.cellCreditEnabled
+      && (bill.name || '').trim().toLowerCase() === 'cell';
+    const cellEffectiveByKey = {};
+    if (isCellBill) {
+      const seenKeys = [];
+      const seenSet = new Set();
+      for (const P of payDates) {
+        const { D } = nextDueCycleFor(bill, P);
+        const k = D.getFullYear() + '-' + String(D.getMonth() + 1).padStart(2, '0');
+        if (!seenSet.has(k)) { seenSet.add(k); seenKeys.push(k); }
+      }
+      let carry = 0;
+      for (const k of seenKeys) {
+        const raw = Math.max(0, Number((State.cellCredits || {})[k] || 0));
+        const avail = raw + carry;
+        const capped = Math.min(avail, Number(bill.amount) || 0);
+        cellEffectiveByKey[k] = capped;
+        carry = Math.max(0, avail - (Number(bill.amount) || 0));
+      }
+    }
+
     // If the bill has an anchor-based recurrence and its anchor date is before the
     // first pay date in the schedule, treat that anchor's due as already resolved
     // (funded by initialSaved). Skip crediting initialSaved to the next cycle.
@@ -1072,8 +1095,8 @@ function computeAllocations(bills, payDates, opts = {}) {
       // per-paycheck amount (with optional per-month credit for Cell bills)
       const cycleKey = D.getFullYear() + '-' + String(D.getMonth() + 1).padStart(2, '0');
       let cellCredit = 0;
-      if (typeof State !== 'undefined' && State.cellCreditEnabled && (bill.name || '').trim().toLowerCase() === 'cell') {
-        cellCredit = Math.max(0, Number((State.cellCredits || {})[cycleKey] || 0));
+      if (isCellBill) {
+        cellCredit = cellEffectiveByKey[cycleKey] || 0;
       }
       const effectiveAmount = Math.max(0, Number(bill.amount) - cellCredit);
       const baseAmount = cycleIndex === 0
@@ -3575,7 +3598,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v53 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v54 · ledger edition</p>
       </div>
     </div>
 

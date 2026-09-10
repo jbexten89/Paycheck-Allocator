@@ -1,5 +1,5 @@
 /* Paycheck Allocator - minimal cache-first service worker */
-const CACHE = 'paycheck-allocator-v53';
+const CACHE = 'paycheck-allocator-v54';
 const ASSETS = [
   './',
   './index.html',
