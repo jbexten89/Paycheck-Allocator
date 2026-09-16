@@ -991,11 +991,21 @@ function canonicalCycleCount(payStart, stepDays, prevDue, D) {
 }
 
 // Replace per-cycle allocations with one lump sum on the first paycheck of each
-// calendar month, equal to each bill's monthly-equivalent rate. Applied only
-// to bills whose category is in `catSet` (lowercased Set of category names).
-function batchMonthlyRateCats(perPaycheck, bills, catSet) {
-  if (!perPaycheck.length || !catSet || !catSet.size) return perPaycheck;
-  const targeted = bills.filter((b) => catSet.has((b.category || '').trim().toLowerCase()) && b.amount > 0 && !b.archived);
+// calendar month, equal to each bill's monthly-equivalent rate. Bills to batch
+// are either identified by category set (lowercased) OR a set of bill ids —
+// the union is targeted, so per-bill shape overrides work.
+function batchMonthlyRateCats(perPaycheck, bills, catSet, billIdSet) {
+  if (!perPaycheck.length) return perPaycheck;
+  const cats = catSet || new Set();
+  const ids = billIdSet || new Set();
+  if (!cats.size && !ids.size) return perPaycheck;
+  const targeted = bills.filter((b) => {
+    if (!b || b.archived || !(b.amount > 0)) return false;
+    if (ids.has(b.id)) return true;
+    // Category-driven inclusion — only if the bill hasn't overridden its shape.
+    if (b.shape && b.shape !== 'inherit') return false;
+    return cats.has((b.category || '').trim().toLowerCase());
+  });
   if (!targeted.length) return perPaycheck;
   const monthlyRate = (b) => {
     if (b.recurrence === 'everyNMonths') return Number(b.amount) / Math.max(1, Number(b.intervalMonths) || 1);
@@ -1123,7 +1133,9 @@ function computeAllocations(bills, payDates, opts = {}) {
       const isLastVisibleInCycle = (i + 1 >= payDates.length)
         || (toISO(nextDueCycleFor(bill, payDates[i + 1]).D) !== dueKey);
       const cat = (bill.category || '').trim().toLowerCase();
-      const shape = (typeof State !== 'undefined' && State.getCatShape) ? State.getCatShape(cat) : 'spread';
+      // Per-bill shape override wins over category default when set
+      const catShape = (typeof State !== 'undefined' && State.getCatShape) ? State.getCatShape(cat) : 'spread';
+      const shape = (bill.shape && bill.shape !== 'inherit') ? bill.shape : catShape;
       let perPay;
       if (shape === 'monthly-rate') {
         // Handled by post-process; skip per-cycle allocation.
@@ -1173,14 +1185,19 @@ function computeAllocations(bills, payDates, opts = {}) {
   }
   if (typeof State !== 'undefined' && State.catShape) {
     const monthlyRateCats = new Set(Object.entries(State.catShape).filter(([_, v]) => v === 'monthly-rate').map(([k]) => k));
-    if (monthlyRateCats.size) batchMonthlyRateCats(perPaycheck, bills, monthlyRateCats);
+    // Bills with per-bill shape override to monthly-rate — win over any category default
+    const monthlyRateIds = new Set(bills.filter((b) => b && b.shape === 'monthly-rate' && !b.archived && b.amount > 0).map((b) => b.id));
+    if (monthlyRateCats.size || monthlyRateIds.size) batchMonthlyRateCats(perPaycheck, bills, monthlyRateCats, monthlyRateIds);
     const weightedCats = new Set(Object.entries(State.catShape).filter(([_, v]) => v === 'weighted-spread').map(([k]) => k));
-    if (weightedCats.size) {
+    const weightedIds = new Set(bills.filter((b) => b && b.shape === 'weighted-spread' && !b.archived && b.amount > 0).map((b) => b.id));
+    if (weightedCats.size || weightedIds.size) {
       // Redistribute weighted-spread bills inversely to other-bill per-pay loads within each cycle.
       for (const bill of bills) {
         if (!bill || bill.archived || !(bill.amount > 0)) continue;
         const cat = (bill.category || '').trim().toLowerCase();
-        if (!weightedCats.has(cat)) continue;
+        const hasOverride = bill.shape && bill.shape !== 'inherit';
+        const included = hasOverride ? weightedIds.has(bill.id) : weightedCats.has(cat);
+        if (!included) continue;
         // Group this bill's items by cycle (dueDate key)
         const cycles = new Map();
         perPaycheck.forEach((p, idx) => {
@@ -3176,6 +3193,23 @@ function openBillEditor(id) {
           <label>Category</label>
           <input name="category" type="text" value="${escapeAttr(b.category || '')}" placeholder="Utilities" />
         </div>
+        <div class="full">
+          <label>Payment shape (this bill only)</label>
+          <select name="shape">
+            ${[
+              ['inherit',             'Use category default'],
+              ['spread',              'Spread evenly'],
+              ['weighted-spread',     'Weighted spread'],
+              ['single-cycle',        'Once per cycle (last pay)'],
+              ['first-cycle',         'Once per cycle (first pay)'],
+              ['first-two-of-three',  'First-two-of-three'],
+              ['last-two-of-three',   'Last-two-of-three'],
+              ['bi-monthly-rate',     'Bi-monthly rate'],
+              ['monthly-rate',        'Monthly rate, first pay of month']
+            ].map(([v, l]) => `<option value="${v}" ${(b.shape || 'inherit') === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+          <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">Overrides the category's shape for this one bill (e.g. spread Mortgage while other Housing bills use once-per-cycle).</div>
+        </div>
         <div class="full" id="preview"></div>
       </div>
     </form>
@@ -3218,7 +3252,8 @@ function openBillEditor(id) {
           amount,
           initialSaved: parseFloat(fd.get('initialSaved')) || 0,
           color: fd.get('color'),
-          category: (fd.get('category') || '').toString().trim()
+          category: (fd.get('category') || '').toString().trim(),
+          shape: (() => { const s = fd.get('shape'); return (!s || s === 'inherit') ? '' : s; })()
         };
       };
       const renderPreview = () => {
@@ -3667,7 +3702,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v63 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v64 · ledger edition</p>
       </div>
     </div>
 
