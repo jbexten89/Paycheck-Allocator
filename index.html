@@ -1496,13 +1496,19 @@ const State = {
         localStorage.setItem(STORE.inlineEditCats, JSON.stringify([...this.inlineEditCats]));
       }
     } catch { this.inlineEditCats = new Set(); }
-    // Per-pay-date allocation overrides for Flexible bills. Prune entries older than 60 days.
+    // Per-pay-date allocation overrides for inline-edit bills. Prune entries older than 60 days
+    // AND drop entries whose bill's category isn't in the current inlineEditCats set — those
+    // are stale from a prior toggle-cycle and would silently re-apply on re-enable otherwise.
     try {
       const raw = JSON.parse(localStorage.getItem(STORE.flexOverrides) || '{}') || {};
       const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 60); cutoff.setHours(0,0,0,0);
+      const billCat = new Map(this.bills.map((b) => [b.id, ((b.category || '').trim().toLowerCase())]));
       this.flexOverrides = {};
       for (const [billId, dateMap] of Object.entries(raw)) {
         if (!dateMap || typeof dateMap !== 'object') continue;
+        const cat = billCat.get(billId);
+        // If we know the bill and its category isn't enabled, drop wholesale
+        if (cat !== undefined && !this.inlineEditCats.has(cat)) continue;
         const kept = {};
         for (const [iso, amt] of Object.entries(dateMap)) {
           try { if (parseISO(iso) >= cutoff) kept[iso] = Number(amt) || 0; } catch {}
@@ -3896,7 +3902,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v71 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v72 · ledger edition</p>
       </div>
     </div>
 
