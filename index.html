@@ -2543,7 +2543,14 @@ route('dashboard', (root) => {
     WhatIf.enter();
     navigate();
   };
+  const selectAllOnFocus = (inp) => {
+    const sel = () => { try { inp.select(); } catch {} };
+    inp.addEventListener('focus', sel);
+    // iOS Safari can steal the selection after focus; a click also selects.
+    inp.addEventListener('click', sel);
+  };
   root.querySelectorAll('.cell-credit-input').forEach((inp) => {
+    selectAllOnFocus(inp);
     inp.addEventListener('change', () => {
       State.setCellCredit(inp.dataset.mkey, parseFloat(inp.value) || 0);
       const y = window.scrollY;
@@ -2552,6 +2559,7 @@ route('dashboard', (root) => {
     });
   });
   root.querySelectorAll('.flex-amt-input').forEach((inp) => {
+    selectAllOnFocus(inp);
     inp.addEventListener('change', () => {
       State.setFlexOverride(inp.dataset.bill, inp.dataset.pay, parseFloat(inp.value));
       try { Sync.push(); } catch {}
@@ -3797,7 +3805,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v65 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v66 · ledger edition</p>
       </div>
     </div>
 
