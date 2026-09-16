@@ -360,7 +360,8 @@
     font-size: 13px !important;
     text-align: right !important;
     font-variant-numeric: tabular-nums;
-    color: var(--good) !important; /* default: unchanged from computed */
+    color: var(--good) !important;
+    -webkit-text-fill-color: var(--good) !important; /* iOS WebKit overrides color; must set fill too */
     font-weight: 600 !important;
   }
   .cell-credit-input {
@@ -3873,7 +3874,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v73 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v74 · ledger edition</p>
       </div>
     </div>
 
