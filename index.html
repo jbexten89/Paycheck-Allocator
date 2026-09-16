@@ -353,6 +353,16 @@
   .setaside-bar-fill.over { background: var(--danger); }
   .leftover-amount { font-size: 16px; font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; }
   .leftover-amount.short { color: var(--danger); }
+  .flex-amt-input {
+    display: inline-block !important;
+    width: 82px !important;
+    padding: 2px 6px !important;
+    font-size: 13px !important;
+    text-align: right !important;
+    font-variant-numeric: tabular-nums;
+    color: var(--good) !important;
+    font-weight: 600 !important;
+  }
   .cell-credit-input {
     display: inline-block !important;
     width: 70px !important;
@@ -842,7 +852,8 @@ const STORE = {
   catShapePrev: 'paycheck_allocator.cat_shape_prev',
   catShapePrevAt: 'paycheck_allocator.cat_shape_prev_at',
   roundSetAside: 'paycheck_allocator.round_set_aside',
-  optimizeShapes: 'paycheck_allocator.optimize_shapes'
+  optimizeShapes: 'paycheck_allocator.optimize_shapes',
+  flexOverrides: 'paycheck_allocator.flex_overrides'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1241,6 +1252,39 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
     }
   }
+  // Per-pay-date flex overrides — user-set allocation amount for Flexible bills
+  // on a specific paycheck. Applied before pay-index rewrite so the ratio
+  // reflects the resulting funded set.
+  if (typeof State !== 'undefined' && State.flexOverrides) {
+    const flexBillIds = new Set(bills
+      .filter((b) => b && !b.archived && ((b.category || '').trim().toLowerCase() === 'flexible'))
+      .map((b) => b.id));
+    if (flexBillIds.size) {
+      for (const p of perPaycheck) {
+        const iso = toISO(p.payDate);
+        for (const billId of flexBillIds) {
+          const override = State.getFlexOverride(billId, iso);
+          if (override === null) continue;
+          const existing = p.items.find((x) => x.billId === billId);
+          if (existing) {
+            p.total += (override - existing.amount);
+            existing.amount = override;
+            existing.overridden = true;
+          } else if (override > 0) {
+            const bill = bills.find((b) => b.id === billId);
+            if (!bill) continue;
+            const { D } = nextDueCycleFor(bill, p.payDate);
+            p.items.push({
+              billId, name: bill.name, color: bill.color, amount: override,
+              runningBalance: override, dueDate: D, paychecksInCycle: 1, payIdxInCycle: 1,
+              overridden: true
+            });
+            p.total += override;
+          }
+        }
+      }
+    }
+  }
   // Rewrite payIdxInCycle / paychecksInCycle so the ratio reflects the pays
   // actually FUNDED for that cycle (amount > 0), not raw window pays. A bill
   // concentrated onto one pay by singleSmallMonthly / single-cycle shows 1/1.
@@ -1438,6 +1482,21 @@ const State = {
     } catch { this.optimizeShapes = new Set(DEFAULT_OPT_SHAPES); }
     // paidCycles removed — was surface without enough value; keep localStorage tidy.
     try { localStorage.removeItem('paycheck_allocator.paid_cycles'); } catch {}
+    // Per-pay-date allocation overrides for Flexible bills. Prune entries older than 60 days.
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORE.flexOverrides) || '{}') || {};
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 60); cutoff.setHours(0,0,0,0);
+      this.flexOverrides = {};
+      for (const [billId, dateMap] of Object.entries(raw)) {
+        if (!dateMap || typeof dateMap !== 'object') continue;
+        const kept = {};
+        for (const [iso, amt] of Object.entries(dateMap)) {
+          try { if (parseISO(iso) >= cutoff) kept[iso] = Number(amt) || 0; } catch {}
+        }
+        if (Object.keys(kept).length) this.flexOverrides[billId] = kept;
+      }
+      localStorage.setItem(STORE.flexOverrides, JSON.stringify(this.flexOverrides));
+    } catch { this.flexOverrides = {}; }
     this.skipLastOfThree = localStorage.getItem(STORE.skipLastOfThree) === '1';
     this.singleSmallMonthly = localStorage.getItem(STORE.singleSmallMonthly) === '1';
     this.singleSmallThreshold = parseFloat(localStorage.getItem(STORE.singleSmallThreshold) || '500') || 500;
@@ -1514,6 +1573,24 @@ const State = {
     localStorage.setItem(STORE.dueSoonCatsOff, JSON.stringify([...this.dueSoonCatsOff]));
   },
   isDueSoonCat(cat) { return !this.dueSoonCatsOff.has((cat || '').toLowerCase()); },
+  setFlexOverride(billId, payDateISO, amount) {
+    if (!billId || !payDateISO) return;
+    const val = Number(amount);
+    const map = this.flexOverrides[billId] || {};
+    if (!isFinite(val) || val < 0) {
+      delete map[payDateISO];
+    } else {
+      map[payDateISO] = val;
+    }
+    if (Object.keys(map).length) this.flexOverrides[billId] = map;
+    else delete this.flexOverrides[billId];
+    localStorage.setItem(STORE.flexOverrides, JSON.stringify(this.flexOverrides));
+  },
+  getFlexOverride(billId, payDateISO) {
+    const m = this.flexOverrides[billId];
+    if (!m) return null;
+    return payDateISO in m ? m[payDateISO] : null;
+  },
   setYearViewEnabled(v) { this.yearViewEnabled = !!v; localStorage.setItem(STORE.yearViewEnabled, v ? '1' : '0'); },
   setRoundSetAside(v) { this.roundSetAside = !!v; localStorage.setItem(STORE.roundSetAside, v ? '1' : '0'); },
   setOptimizeShapeAllowed(shape, allowed) {
@@ -1772,6 +1849,7 @@ const Sync = {
       yearViewEnabled: State.yearViewEnabled,
       roundSetAside: State.roundSetAside,
       optimizeShapes: [...State.optimizeShapes],
+      flexOverrides: State.flexOverrides,
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
       singleSmallThreshold: State.singleSmallThreshold,
@@ -1810,6 +1888,10 @@ const Sync = {
       State.optimizeShapes = new Set(p.optimizeShapes);
       if (!State.optimizeShapes.has('spread')) State.optimizeShapes.add('spread');
       localStorage.setItem(STORE.optimizeShapes, JSON.stringify([...State.optimizeShapes]));
+    }
+    if (p.flexOverrides && typeof p.flexOverrides === 'object') {
+      State.flexOverrides = { ...p.flexOverrides };
+      localStorage.setItem(STORE.flexOverrides, JSON.stringify(State.flexOverrides));
     }
     if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
     if (typeof p.singleSmallMonthly === 'boolean') { State.setSingleSmallMonthly(p.singleSmallMonthly); }
@@ -2421,12 +2503,16 @@ route('dashboard', (root) => {
                     const payFrac = (it.payIdxInCycle && it.paychecksInCycle)
                       ? `${it.payIdxInCycle}/${it.paychecksInCycle}`
                       : '—';
+                    const isFlex = next && (billObj && ((billObj.category || '').trim().toLowerCase() === 'flexible'));
+                    const allocateCell = isFlex
+                      ? `<td class="total"><input class="flex-amt-input" type="number" step="0.01" min="0" value="${(it.amount || 0).toFixed(2)}" data-bill="${escapeAttr(it.billId)}" data-pay="${toISO(next.payDate)}" /></td>`
+                      : `<td class="total">${fmtUSD.format(it.amount)}</td>`;
                     return `
                     <tr${classes.length ? ` class="${classes.join(' ')}"` : ''}>
                       <td>${escapeHtml(it.name)}${cellExtra}${dueSoonChipHtml(dueInfo)}</td>
                       <td>${it.dueDate ? fmtDateShort.format(it.dueDate) : '—'}</td>
                       <td style="text-align:center; font-variant-numeric:tabular-nums; color:var(--ink-muted);">${payFrac}</td>
-                      <td class="total">${fmtUSD.format(it.amount)}</td>
+                      ${allocateCell}
                     </tr>`;
                   }).join('');
                   return header + rows;
@@ -2460,6 +2546,15 @@ route('dashboard', (root) => {
   root.querySelectorAll('.cell-credit-input').forEach((inp) => {
     inp.addEventListener('change', () => {
       State.setCellCredit(inp.dataset.mkey, parseFloat(inp.value) || 0);
+      const y = window.scrollY;
+      navigate();
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    });
+  });
+  root.querySelectorAll('.flex-amt-input').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      State.setFlexOverride(inp.dataset.bill, inp.dataset.pay, parseFloat(inp.value));
+      try { Sync.push(); } catch {}
       const y = window.scrollY;
       navigate();
       requestAnimationFrame(() => window.scrollTo(0, y));
@@ -3702,7 +3797,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v64 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v65 · ledger edition</p>
       </div>
     </div>
 
@@ -4009,7 +4104,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
