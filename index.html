@@ -1591,7 +1591,25 @@ const State = {
   setInlineEditCat(cat, on) {
     const key = (cat || '').toLowerCase();
     if (!key) return;
-    if (on) this.inlineEditCats.add(key); else this.inlineEditCats.delete(key);
+    if (on) {
+      this.inlineEditCats.add(key);
+    } else {
+      this.inlineEditCats.delete(key);
+      // Clear any saved allocation overrides for bills in this category
+      // so re-enabling doesn't silently resurrect prior edits.
+      const idsInCat = new Set(
+        this.bills
+          .filter((b) => ((b.category || '').trim().toLowerCase() === key))
+          .map((b) => b.id)
+      );
+      if (idsInCat.size) {
+        let touched = false;
+        for (const billId of Object.keys(this.flexOverrides)) {
+          if (idsInCat.has(billId)) { delete this.flexOverrides[billId]; touched = true; }
+        }
+        if (touched) localStorage.setItem(STORE.flexOverrides, JSON.stringify(this.flexOverrides));
+      }
+    }
     localStorage.setItem(STORE.inlineEditCats, JSON.stringify([...this.inlineEditCats]));
   },
   isInlineEditCat(cat) { return this.inlineEditCats.has((cat || '').toLowerCase()); },
@@ -3878,7 +3896,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v70 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v71 · ledger edition</p>
       </div>
     </div>
 
