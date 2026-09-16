@@ -854,7 +854,8 @@ const STORE = {
   roundSetAside: 'paycheck_allocator.round_set_aside',
   optimizeShapes: 'paycheck_allocator.optimize_shapes',
   flexOverrides: 'paycheck_allocator.flex_overrides',
-  flexEditEnabled: 'paycheck_allocator.flex_edit_enabled'
+  flexEditEnabled: 'paycheck_allocator.flex_edit_enabled',
+  inlineEditCats: 'paycheck_allocator.inline_edit_cats'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1253,12 +1254,12 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
     }
   }
-  // Per-pay-date flex overrides — user-set allocation amount for Flexible bills
-  // on a specific paycheck. Applied before pay-index rewrite so the ratio
-  // reflects the resulting funded set.
+  // Per-pay-date allocation overrides — user-set amount for bills in categories
+  // that opted into inline editing. Applied before pay-index rewrite so the
+  // ratio reflects the resulting funded set.
   if (typeof State !== 'undefined' && State.flexOverrides) {
     const flexBillIds = new Set(bills
-      .filter((b) => b && !b.archived && ((b.category || '').trim().toLowerCase() === 'flexible'))
+      .filter((b) => b && !b.archived && State.isInlineEditCat((b.category || '').trim() || 'Uncategorized'))
       .map((b) => b.id));
     if (flexBillIds.size) {
       for (const p of perPaycheck) {
@@ -1484,6 +1485,16 @@ const State = {
     // paidCycles removed — was surface without enough value; keep localStorage tidy.
     try { localStorage.removeItem('paycheck_allocator.paid_cycles'); } catch {}
     this.flexEditEnabled = localStorage.getItem(STORE.flexEditEnabled) !== '0';
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORE.inlineEditCats) || 'null');
+      if (Array.isArray(raw)) {
+        this.inlineEditCats = new Set(raw.map((s) => String(s).toLowerCase()));
+      } else {
+        // First run: migrate the legacy single Flexible toggle
+        this.inlineEditCats = new Set(this.flexEditEnabled ? ['flexible'] : []);
+        localStorage.setItem(STORE.inlineEditCats, JSON.stringify([...this.inlineEditCats]));
+      }
+    } catch { this.inlineEditCats = new Set(); }
     // Per-pay-date allocation overrides for Flexible bills. Prune entries older than 60 days.
     try {
       const raw = JSON.parse(localStorage.getItem(STORE.flexOverrides) || '{}') || {};
@@ -1576,6 +1587,13 @@ const State = {
   },
   isDueSoonCat(cat) { return !this.dueSoonCatsOff.has((cat || '').toLowerCase()); },
   setFlexEditEnabled(v) { this.flexEditEnabled = !!v; localStorage.setItem(STORE.flexEditEnabled, v ? '1' : '0'); },
+  setInlineEditCat(cat, on) {
+    const key = (cat || '').toLowerCase();
+    if (!key) return;
+    if (on) this.inlineEditCats.add(key); else this.inlineEditCats.delete(key);
+    localStorage.setItem(STORE.inlineEditCats, JSON.stringify([...this.inlineEditCats]));
+  },
+  isInlineEditCat(cat) { return this.inlineEditCats.has((cat || '').toLowerCase()); },
   setFlexOverride(billId, payDateISO, amount) {
     if (!billId || !payDateISO) return;
     const val = Number(amount);
@@ -1854,6 +1872,7 @@ const Sync = {
       optimizeShapes: [...State.optimizeShapes],
       flexOverrides: State.flexOverrides,
       flexEditEnabled: State.flexEditEnabled,
+      inlineEditCats: [...State.inlineEditCats],
       skipLastOfThree: State.skipLastOfThree,
       singleSmallMonthly: State.singleSmallMonthly,
       singleSmallThreshold: State.singleSmallThreshold,
@@ -1898,6 +1917,10 @@ const Sync = {
       localStorage.setItem(STORE.flexOverrides, JSON.stringify(State.flexOverrides));
     }
     if (typeof p.flexEditEnabled === 'boolean') { State.setFlexEditEnabled(p.flexEditEnabled); }
+    if (Array.isArray(p.inlineEditCats)) {
+      State.inlineEditCats = new Set(p.inlineEditCats.map((s) => String(s).toLowerCase()));
+      localStorage.setItem(STORE.inlineEditCats, JSON.stringify([...State.inlineEditCats]));
+    }
     if (typeof p.skipLastOfThree === 'boolean') { State.setSkipLastOfThree(p.skipLastOfThree); }
     if (typeof p.singleSmallMonthly === 'boolean') { State.setSingleSmallMonthly(p.singleSmallMonthly); }
     if (typeof p.singleSmallThreshold === 'number') { State.setSingleSmallThreshold(p.singleSmallThreshold); }
@@ -2508,8 +2531,9 @@ route('dashboard', (root) => {
                     const payFrac = (it.payIdxInCycle && it.paychecksInCycle)
                       ? `${it.payIdxInCycle}/${it.paychecksInCycle}`
                       : '—';
-                    const isFlex = next && (billObj && ((billObj.category || '').trim().toLowerCase() === 'flexible'));
-                    const allocateCell = (isFlex && State.flexEditEnabled)
+                    const catKey = (billObj && (billObj.category || '').trim()) || 'Uncategorized';
+                    const editable = next && billObj && State.isInlineEditCat(catKey);
+                    const allocateCell = editable
                       ? `<td class="total"><input class="flex-amt-input" type="number" step="0.01" min="0" value="${(it.amount || 0).toFixed(2)}" data-bill="${escapeAttr(it.billId)}" data-pay="${toISO(next.payDate)}" /></td>`
                       : `<td class="total">${fmtUSD.format(it.amount)}</td>`;
                     return `
@@ -3655,10 +3679,21 @@ route('settings', (root) => {
           <input id="round-set-aside" type="checkbox" ${State.roundSetAside ? 'checked' : ''} style="width:auto;" />
           <label for="round-set-aside" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Round set-aside amounts to the nearest $1</label>
         </div>
-        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
-          <input id="flex-edit-enable" type="checkbox" ${State.flexEditEnabled ? 'checked' : ''} style="width:auto;" />
-          <label for="flex-edit-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Inline-edit Flexible bill allocations on Dashboard</label>
-        </div>
+        ${(() => {
+          const cats = State.orderedCategories();
+          if (!cats.length) return '';
+          return `<div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--hairline);">
+            <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:8px;">Inline-edit Allocate on Dashboard for these categories:</div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${cats.map((cat) => `
+                <label style="display:flex; align-items:center; gap:8px; margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink); cursor:pointer;">
+                  <input type="checkbox" class="inline-edit-cat" data-cat="${escapeAttr(cat)}" ${State.isInlineEditCat(cat) ? 'checked' : ''} style="width:auto;" />
+                  <span>${escapeHtml(cat)}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>`;
+        })()}
       </div>
       <div class="card">
         <h2>Appearance</h2>
@@ -3814,7 +3849,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v67 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v68 · ledger edition</p>
       </div>
     </div>
 
@@ -3999,8 +4034,9 @@ route('settings', (root) => {
   if (yearViewEl) yearViewEl.onchange = (e) => { State.setYearViewEnabled(e.target.checked); };
   const roundEl = $('#round-set-aside');
   if (roundEl) roundEl.onchange = (e) => { State.setRoundSetAside(e.target.checked); navigate(); };
-  const flexEditEl = $('#flex-edit-enable');
-  if (flexEditEl) flexEditEl.onchange = (e) => { State.setFlexEditEnabled(e.target.checked); };
+  $$('.inline-edit-cat').forEach((el) => {
+    el.onchange = () => { State.setInlineEditCat(el.dataset.cat, el.checked); };
+  });
 
   const getCreds = () => ({
     email: ($('#sync-email')?.value || '').trim(),
@@ -4123,7 +4159,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
