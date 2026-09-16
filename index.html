@@ -363,7 +363,6 @@
     color: var(--good) !important; /* default: unchanged from computed */
     font-weight: 600 !important;
   }
-  .flex-amt-input.overridden { color: var(--ink) !important; } /* user-set override */
   .cell-credit-input {
     display: inline-block !important;
     width: 70px !important;
@@ -2558,28 +2557,8 @@ route('dashboard', (root) => {
                       : '—';
                     const catKey = (billObj && (billObj.category || '').trim()) || 'Uncategorized';
                     const editable = next && billObj && State.isInlineEditCat(catKey);
-                    // Baseline = allocated amount with NO override for this pay
-                    let baseline = it.amount;
-                    if (editable) {
-                      const savedOverride = State.getFlexOverride(it.billId, toISO(next.payDate));
-                      if (savedOverride !== null) {
-                        // Recompute what it would be without this override
-                        const stash = State.flexOverrides[it.billId] || {};
-                        const saved = stash[toISO(next.payDate)];
-                        delete stash[toISO(next.payDate)];
-                        try {
-                          const { perPaycheck: pp } = computeAllocations(State.bills, State.paySchedule(26));
-                          const p2 = pp.find((x) => toISO(x.payDate) === toISO(next.payDate));
-                          const it2 = p2 && p2.items.find((x) => x.billId === it.billId);
-                          baseline = it2 ? it2.amount : 0;
-                        } finally {
-                          stash[toISO(next.payDate)] = saved;
-                        }
-                      }
-                    }
-                    const isOverridden = editable ? (Math.abs((it.amount || 0) - (baseline || 0)) > 0.005) : false;
                     const allocateCell = editable
-                      ? `<td class="total"><input class="flex-amt-input${isOverridden ? ' overridden' : ''}" type="number" step="0.01" min="0" value="${(it.amount || 0).toFixed(2)}" data-bill="${escapeAttr(it.billId)}" data-pay="${toISO(next.payDate)}" data-baseline="${(baseline || 0).toFixed(2)}" /></td>`
+                      ? `<td class="total"><input class="flex-amt-input" type="number" step="0.01" min="0" value="${(it.amount || 0).toFixed(2)}" data-bill="${escapeAttr(it.billId)}" data-pay="${toISO(next.payDate)}" /></td>`
                       : `<td class="total">${fmtUSD.format(it.amount)}</td>`;
                     return `
                     <tr${classes.length ? ` class="${classes.join(' ')}"` : ''}>
@@ -2634,14 +2613,6 @@ route('dashboard', (root) => {
   });
   root.querySelectorAll('.flex-amt-input').forEach((inp) => {
     selectAllOnFocus(inp);
-    // Live color: green when equals baseline, white when differs
-    const syncColor = () => {
-      const cur = parseFloat(inp.value);
-      const base = parseFloat(inp.dataset.baseline);
-      const differs = isFinite(cur) && isFinite(base) && Math.abs(cur - base) > 0.005;
-      inp.classList.toggle('overridden', differs);
-    };
-    inp.addEventListener('input', syncColor);
     inp.addEventListener('change', () => {
       State.setFlexOverride(inp.dataset.bill, inp.dataset.pay, parseFloat(inp.value));
       try { Sync.push(); } catch {}
@@ -3902,7 +3873,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v72 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v73 · ledger edition</p>
       </div>
     </div>
 
