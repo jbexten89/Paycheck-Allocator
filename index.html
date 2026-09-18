@@ -856,7 +856,8 @@ const STORE = {
   optimizeShapes: 'paycheck_allocator.optimize_shapes',
   flexOverrides: 'paycheck_allocator.flex_overrides',
   flexEditEnabled: 'paycheck_allocator.flex_edit_enabled',
-  inlineEditCats: 'paycheck_allocator.inline_edit_cats'
+  inlineEditCats: 'paycheck_allocator.inline_edit_cats',
+  leftoverViewEnabled: 'paycheck_allocator.leftover_view_enabled'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1476,6 +1477,7 @@ const State = {
     try { this.dueSoonCatsOff = new Set(JSON.parse(localStorage.getItem(STORE.dueSoonCatsOff) || '[]').map((s) => String(s).toLowerCase())); }
     catch { this.dueSoonCatsOff = new Set(); }
     this.yearViewEnabled = localStorage.getItem(STORE.yearViewEnabled) !== '0';
+    this.leftoverViewEnabled = localStorage.getItem(STORE.leftoverViewEnabled) !== '0';
     this.roundSetAside = localStorage.getItem(STORE.roundSetAside) === '1';
     // Which shapes the Optimize button is allowed to try. Default: all except bi-monthly-rate.
     const DEFAULT_OPT_SHAPES = ['spread','weighted-spread','single-cycle','first-cycle','first-two-of-three','last-two-of-three','monthly-rate'];
@@ -1638,6 +1640,7 @@ const State = {
     return payDateISO in m ? m[payDateISO] : null;
   },
   setYearViewEnabled(v) { this.yearViewEnabled = !!v; localStorage.setItem(STORE.yearViewEnabled, v ? '1' : '0'); },
+  setLeftoverViewEnabled(v) { this.leftoverViewEnabled = !!v; localStorage.setItem(STORE.leftoverViewEnabled, v ? '1' : '0'); },
   setRoundSetAside(v) { this.roundSetAside = !!v; localStorage.setItem(STORE.roundSetAside, v ? '1' : '0'); },
   setOptimizeShapeAllowed(shape, allowed) {
     if (!shape) return;
@@ -1893,6 +1896,7 @@ const Sync = {
       dueSoonDays: State.dueSoonDays,
       dueSoonCatsOff: [...State.dueSoonCatsOff],
       yearViewEnabled: State.yearViewEnabled,
+      leftoverViewEnabled: State.leftoverViewEnabled,
       roundSetAside: State.roundSetAside,
       optimizeShapes: [...State.optimizeShapes],
       flexOverrides: State.flexOverrides,
@@ -1931,6 +1935,7 @@ const Sync = {
       localStorage.setItem(STORE.dueSoonCatsOff, JSON.stringify([...State.dueSoonCatsOff]));
     }
     if (typeof p.yearViewEnabled === 'boolean') { State.setYearViewEnabled(p.yearViewEnabled); }
+    if (typeof p.leftoverViewEnabled === 'boolean') { State.setLeftoverViewEnabled(p.leftoverViewEnabled); }
     if (typeof p.roundSetAside === 'boolean') { State.setRoundSetAside(p.roundSetAside); }
     if (Array.isArray(p.optimizeShapes)) {
       State.optimizeShapes = new Set(p.optimizeShapes);
@@ -2375,7 +2380,7 @@ route('dashboard', (root) => {
     </div>
 
     ${
-      (State.incomes && State.incomes.some((i) => Number(i.amount) > 0))
+      (State.leftoverViewEnabled && State.incomes && State.incomes.some((i) => Number(i.amount) > 0))
         ? (() => {
             const monthsToShow = State.leftoverMonths;
             const spanCount = monthsToShow >= 12 ? 52 : 26;
@@ -3701,6 +3706,10 @@ route('settings', (root) => {
           <label for="year-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show 12-month year view on Dashboard</label>
         </div>
         <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="leftover-view-enable" type="checkbox" ${State.leftoverViewEnabled ? 'checked' : ''} style="width:auto;" />
+          <label for="leftover-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show Monthly leftover section on Dashboard</label>
+        </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
           <input id="round-set-aside" type="checkbox" ${State.roundSetAside ? 'checked' : ''} style="width:auto;" />
           <label for="round-set-aside" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Round set-aside amounts to the nearest $1</label>
         </div>
@@ -3874,7 +3883,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v74 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v75 · ledger edition</p>
       </div>
     </div>
 
@@ -4057,6 +4066,8 @@ route('settings', (root) => {
   });
   const yearViewEl = $('#year-view-enable');
   if (yearViewEl) yearViewEl.onchange = (e) => { State.setYearViewEnabled(e.target.checked); };
+  const leftoverViewEl = $('#leftover-view-enable');
+  if (leftoverViewEl) leftoverViewEl.onchange = (e) => { State.setLeftoverViewEnabled(e.target.checked); };
   const roundEl = $('#round-set-aside');
   if (roundEl) roundEl.onchange = (e) => { State.setRoundSetAside(e.target.checked); navigate(); };
   $$('.inline-edit-cat').forEach((el) => {
@@ -4184,7 +4195,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
