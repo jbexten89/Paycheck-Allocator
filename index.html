@@ -857,7 +857,8 @@ const STORE = {
   flexOverrides: 'paycheck_allocator.flex_overrides',
   flexEditEnabled: 'paycheck_allocator.flex_edit_enabled',
   inlineEditCats: 'paycheck_allocator.inline_edit_cats',
-  leftoverViewEnabled: 'paycheck_allocator.leftover_view_enabled'
+  leftoverViewEnabled: 'paycheck_allocator.leftover_view_enabled',
+  goals: 'paycheck_allocator.goals'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1256,6 +1257,37 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
     }
   }
+  // Sinking-fund goals — inject a virtual item per goal on each pay in [today, targetDate].
+  // Per-pay contribution = (targetAmount - savedSoFar) / remainingPaysInWindow. Skips goals
+  // whose target date has passed or whose remaining amount is <= 0.
+  if (typeof State !== 'undefined' && Array.isArray(State.goals) && State.goals.length) {
+    const today0 = new Date(); today0.setHours(0,0,0,0);
+    for (const g of State.goals) {
+      if (!g || !g.targetDate) continue;
+      const target = parseISO(g.targetDate);
+      if (!target || target < today0) continue;
+      const remaining = Math.max(0, (Number(g.targetAmount) || 0) - (Number(g.savedSoFar) || 0));
+      if (remaining <= 0) continue;
+      const paysInWindow = perPaycheck.filter((p) => p.payDate >= today0 && p.payDate <= target);
+      if (!paysInWindow.length) continue;
+      const perPay = remaining / paysInWindow.length;
+      paysInWindow.forEach((p, idx) => {
+        p.items.push({
+          billId: 'goal:' + g.id,
+          name: g.name,
+          color: '#8B5CF6',
+          amount: perPay,
+          runningBalance: perPay * (idx + 1),
+          dueDate: target,
+          paychecksInCycle: paysInWindow.length,
+          payIdxInCycle: idx + 1,
+          isGoal: true,
+          category: g.category || 'Goals'
+        });
+        p.total += perPay;
+      });
+    }
+  }
   // Per-pay-date allocation overrides — user-set amount for bills in categories
   // that opted into inline editing. Applied before pay-index rewrite so the
   // ratio reflects the resulting funded set.
@@ -1478,6 +1510,8 @@ const State = {
     catch { this.dueSoonCatsOff = new Set(); }
     this.yearViewEnabled = localStorage.getItem(STORE.yearViewEnabled) !== '0';
     this.leftoverViewEnabled = localStorage.getItem(STORE.leftoverViewEnabled) !== '0';
+    try { this.goals = JSON.parse(localStorage.getItem(STORE.goals) || '[]') || []; }
+    catch { this.goals = []; }
     this.roundSetAside = localStorage.getItem(STORE.roundSetAside) === '1';
     // Which shapes the Optimize button is allowed to try. Default: all except bi-monthly-rate.
     const DEFAULT_OPT_SHAPES = ['spread','weighted-spread','single-cycle','first-cycle','first-two-of-three','last-two-of-three','monthly-rate'];
@@ -1641,6 +1675,31 @@ const State = {
   },
   setYearViewEnabled(v) { this.yearViewEnabled = !!v; localStorage.setItem(STORE.yearViewEnabled, v ? '1' : '0'); },
   setLeftoverViewEnabled(v) { this.leftoverViewEnabled = !!v; localStorage.setItem(STORE.leftoverViewEnabled, v ? '1' : '0'); },
+  saveGoals() { localStorage.setItem(STORE.goals, JSON.stringify(this.goals)); },
+  addGoal(g) {
+    const item = {
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now() + Math.random()),
+      name: (g.name || 'Goal').toString(),
+      category: (g.category || 'Goals').toString(),
+      targetAmount: Number(g.targetAmount) || 0,
+      targetDate: g.targetDate || '',
+      savedSoFar: Number(g.savedSoFar) || 0,
+      createdAt: new Date().toISOString()
+    };
+    this.goals.push(item);
+    this.saveGoals();
+    return item.id;
+  },
+  updateGoal(id, patch) {
+    const i = this.goals.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    this.goals[i] = { ...this.goals[i], ...patch };
+    this.saveGoals();
+  },
+  removeGoal(id) {
+    this.goals = this.goals.filter((x) => x.id !== id);
+    this.saveGoals();
+  },
   setRoundSetAside(v) { this.roundSetAside = !!v; localStorage.setItem(STORE.roundSetAside, v ? '1' : '0'); },
   setOptimizeShapeAllowed(shape, allowed) {
     if (!shape) return;
@@ -1871,6 +1930,12 @@ const State = {
     for (const b of this.bills) {
       present.add((b.category && b.category.trim()) || 'Uncategorized');
     }
+    // Include categories used by any sinking-fund goal so their virtual items group properly
+    if (Array.isArray(this.goals)) {
+      for (const g of this.goals) {
+        if (g && g.category) present.add(g.category.trim() || 'Goals');
+      }
+    }
     const ordered = (this.catOrder || []).filter((c) => present.has(c));
     // Preferred default order for known categories (case-insensitive).
     const preferred = ['Monthly', 'Flexible', 'Non-Monthly', 'Fun Stuff', '3D Printing', 'Subscriptions', 'Maint Home', 'Vehicles'];
@@ -1937,6 +2002,7 @@ const Sync = {
       dueSoonCatsOff: [...State.dueSoonCatsOff],
       yearViewEnabled: State.yearViewEnabled,
       leftoverViewEnabled: State.leftoverViewEnabled,
+      goals: State.goals,
       roundSetAside: State.roundSetAside,
       optimizeShapes: [...State.optimizeShapes],
       flexOverrides: State.flexOverrides,
@@ -1976,6 +2042,7 @@ const Sync = {
     }
     if (typeof p.yearViewEnabled === 'boolean') { State.setYearViewEnabled(p.yearViewEnabled); }
     if (typeof p.leftoverViewEnabled === 'boolean') { State.setLeftoverViewEnabled(p.leftoverViewEnabled); }
+    if (Array.isArray(p.goals)) { State.goals = p.goals; State.saveGoals(); }
     if (typeof p.roundSetAside === 'boolean') { State.setRoundSetAside(p.roundSetAside); }
     if (Array.isArray(p.optimizeShapes)) {
       State.optimizeShapes = new Set(p.optimizeShapes);
@@ -2581,9 +2648,11 @@ route('dashboard', (root) => {
                   // Off: only rows with actual allocation this pay
                   billsToRender = nextItems.filter((it) => it.amount > 0).map((it) => ({
                     billId: it.billId, name: it.name, dueDate: it.dueDate, amount: it.amount,
-                    category: catFor(State.bills.find((x) => x.id === it.billId) || {}),
+                    // Goal items carry their own category; regular items look it up on the bill
+                    category: it.category || catFor(State.bills.find((x) => x.id === it.billId) || {}),
                     payIdxInCycle: it.payIdxInCycle,
-                    paychecksInCycle: it.paychecksInCycle
+                    paychecksInCycle: it.paychecksInCycle,
+                    isGoal: it.isGoal
                   }));
                 }
                 const byCat = {};
@@ -3792,6 +3861,51 @@ route('settings', (root) => {
           <input id="leftover-view-enable" type="checkbox" ${State.leftoverViewEnabled ? 'checked' : ''} style="width:auto;" />
           <label for="leftover-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show Monthly leftover section on Dashboard</label>
         </div>
+      </div>
+      <div class="card">
+        <h2>Sinking-fund goals</h2>
+        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">Save toward a target by a given date. Each goal spreads its remaining amount evenly across every paycheck between today and its target date, so it shows up alongside your bills in the breakdown.</div>
+        <div id="goals-list" style="display:flex; flex-direction:column; gap:10px;">
+          ${(State.goals || []).map((g) => {
+            const remaining = Math.max(0, Number(g.targetAmount || 0) - Number(g.savedSoFar || 0));
+            const pct = Number(g.targetAmount) > 0 ? Math.min(100, Math.round((Number(g.savedSoFar || 0) / Number(g.targetAmount)) * 100)) : 0;
+            return `
+            <div class="goal-row" data-id="${g.id}" style="position:relative; border:1px solid var(--hairline); border-radius:10px; padding:10px;">
+              <button class="btn btn-ghost" data-x="goal-remove" title="Remove goal" style="position:absolute; top:-2px; right:-2px; padding:0 4px; font-size:12px; line-height:1;">✕</button>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                <div style="grid-column: span 2;">
+                  <label style="font-size:11px;">Name</label>
+                  <input data-gf="name" type="text" value="${escapeAttr(g.name || '')}" placeholder="e.g. Vacation" />
+                </div>
+                <div>
+                  <label style="font-size:11px;">Target amount</label>
+                  <input data-gf="targetAmount" type="number" min="0" step="0.01" value="${g.targetAmount || ''}" placeholder="e.g. 2000" />
+                </div>
+                <div>
+                  <label style="font-size:11px;">Target date</label>
+                  <input data-gf="targetDate" type="date" value="${g.targetDate || ''}" />
+                </div>
+                <div>
+                  <label style="font-size:11px;">Saved so far</label>
+                  <input data-gf="savedSoFar" type="number" min="0" step="0.01" value="${g.savedSoFar || 0}" />
+                </div>
+                <div>
+                  <label style="font-size:11px;">Category</label>
+                  <input data-gf="category" type="text" value="${escapeAttr(g.category || 'Goals')}" placeholder="Goals" />
+                </div>
+              </div>
+              <div style="margin-top:8px;">
+                <div style="height:6px; background:var(--paper); border-radius:3px; overflow:hidden;">
+                  <div style="height:100%; width:${pct}%; background:#8B5CF6;"></div>
+                </div>
+                <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">${pct}% saved · ${fmtUSD.format(remaining)} remaining</div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div style="margin-top:10px;">
+          <button class="btn" id="add-goal">+ Add goal</button>
+        </div>
         <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
           <input id="round-set-aside" type="checkbox" ${State.roundSetAside ? 'checked' : ''} style="width:auto;" />
           <label for="round-set-aside" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Round set-aside amounts to the nearest $1</label>
@@ -3966,7 +4080,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v79 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v80 · ledger edition</p>
       </div>
     </div>
 
@@ -4179,6 +4293,31 @@ route('settings', (root) => {
   if (yearViewEl) yearViewEl.onchange = (e) => { State.setYearViewEnabled(e.target.checked); };
   const leftoverViewEl = $('#leftover-view-enable');
   if (leftoverViewEl) leftoverViewEl.onchange = (e) => { State.setLeftoverViewEnabled(e.target.checked); };
+  const addGoalBtn = $('#add-goal');
+  if (addGoalBtn) addGoalBtn.onclick = () => {
+    const today = new Date();
+    const oneYear = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
+    State.addGoal({ name: 'New goal', targetAmount: 0, targetDate: toISO(oneYear), savedSoFar: 0, category: 'Goals' });
+    navigate();
+  };
+  $$('#goals-list .goal-row').forEach((row) => {
+    const id = row.dataset.id;
+    row.querySelectorAll('[data-gf]').forEach((inp) => {
+      inp.onchange = () => {
+        const field = inp.dataset.gf;
+        let val = inp.value;
+        if (field === 'targetAmount' || field === 'savedSoFar') val = parseFloat(val) || 0;
+        State.updateGoal(id, { [field]: val });
+        navigate();
+      };
+    });
+    const rm = row.querySelector('[data-x="goal-remove"]');
+    if (rm) rm.onclick = () => {
+      if (!confirm('Remove this goal?')) return;
+      State.removeGoal(id);
+      navigate();
+    };
+  });
   const roundEl = $('#round-set-aside');
   if (roundEl) roundEl.onchange = (e) => { State.setRoundSetAside(e.target.checked); navigate(); };
   $$('.inline-edit-cat').forEach((el) => {
@@ -4306,7 +4445,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled','saveGoals','addGoal','updateGoal','removeGoal'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
