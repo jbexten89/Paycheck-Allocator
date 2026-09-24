@@ -4183,7 +4183,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v96 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v97 · ledger edition</p>
       </div>
     </div>
 
@@ -4234,8 +4234,27 @@ route('settings', (root) => {
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
           <li><strong>Due-soon highlight</strong> (Rules) — highlights monthly bills coming due within N days on the Bills page and the Dashboard breakdown. Per-category checkbox list lets you silence sections (e.g. subscriptions).</li>
           <li><strong>Year view</strong> (General → Views) — 12-month grid of set-aside vs income with a bar per month. Toggle off from Views to hide it.</li>
+          <li><strong>Monthly leftover section</strong> (General → Views) — toggle the expandable per-month table on the Dashboard.</li>
           <li><strong>Round set-aside to nearest $1</strong> (General → Views) — cleaner numbers; per-bill-per-cycle totals still equal the exact bill amount.</li>
+          <li><strong>Inline-edit Allocate on Dashboard</strong> (General → Views) — per-category checklist. Enabled categories get an editable number input on each Dashboard breakdown row for the next pay; the override rolls through Year view and Monthly leftover.</li>
           <li><strong>Monthly leftover view</strong> — 6 or 12 months; also switches the year view's data window.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>Sinking fund</h2>
+        <p style="color:var(--ink-soft);">One savings bucket that shows up alongside your bills. Two modes:</p>
+        <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li><strong>Target amount by date</strong> — spreads (target − saved) evenly across every paycheck between the start date (default today) and target date.</li>
+          <li><strong>% of each pay's leftover</strong> — takes that percentage of every pay's (income − bills) as the contribution. No target needed; keeps running indefinitely.</li>
+        </ul>
+        <p style="color:var(--ink-soft); font-size:13px; margin-top:8px;">Category defaults to "Goals" and floats above bills in the Dashboard breakdown. Update <em>Saved so far</em> manually when you actually move the money.</p>
+      </div>
+      <div class="card">
+        <h2>Per-bill shape + income schedule</h2>
+        <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
+          <li><strong>Bill editor → Payment shape (this bill only)</strong> — override the category default for one bill (e.g. spread Mortgage while other Housing bills run once-per-cycle).</li>
+          <li><strong>Income → Scheduled amount changes</strong> — schedule a raise or cut on a specific date; every pay on or after that date uses the new amount until the next change.</li>
+          <li><strong>Cell credit</strong> — inline monthly credit on the Cell bill; overflow rolls to the next month automatically.</li>
         </ul>
       </div>
       <div class="card">
@@ -4252,9 +4271,10 @@ route('settings', (root) => {
         <h2>Dashboard</h2>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
           <li>Use ‹ › to walk forward and back through pay periods. <strong>today</strong> returns to the current one.</li>
-          <li>Cash-flow chart: bars are set-aside per pay; the small tick above each bar is that pay's household income. Bars turn red when set-aside exceeds income.</li>
+          <li>Cash-flow chart: bars are set-aside per pay; per-bar tick marks show that pay's income. Over-income bars cap visually at the income line and go red. A dashed amber line marks the average set-aside; red ▲ marks the peak pay, green ▼ marks the low.</li>
           <li><strong>Set aside</strong> card shows leftover vs short for the next pay based on that pay's income.</li>
-          <li><strong>Monthly leftover</strong> — net (income − set aside) per calendar month. Red = the month goes short.</li>
+          <li><strong>Next paycheck breakdown</strong> — bills grouped by category, showing due date, pay-in-cycle (e.g. 1/2), and allocated amount. Goal rows show cumulative / target underneath.</li>
+          <li><strong>Monthly leftover</strong> — tap any month row to expand it into per-pay detail rows.</li>
           <li><strong>Year view</strong> — 12 tiles, one per month, colored by tightness (green / amber / red / muted).</li>
         </ul>
       </div>
@@ -4264,10 +4284,14 @@ route('settings', (root) => {
         <p style="color:var(--ink-soft); font-size:13px;">Regular <em>Data → Export JSON</em> gives a manual backup file. The Optimize snapshot is local-only (not synced).</p>
       </div>
       <div class="card">
+        <h2>Bills page monthly total</h2>
+        <p style="color:var(--ink-soft);">Sticky bar under the header shows the monthly-equivalent total across all active bills. Every-N-weeks bills contribute <code>amount × 30/(7·N)</code>, every-N-months bills contribute <code>amount / N</code>, archived and $0 bills are excluded. Matches the Dashboard "Total monthly" card.</p>
+      </div>
+      <div class="card">
         <h2>Tips</h2>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
           <li>Set <strong>Show $0 bills on dashboard (grayed)</strong> to see the full bill list even when nothing's allocated that pay.</li>
-          <li>Use per-month <strong>Cell credit</strong> on the Dashboard to reduce Cell's amount for a specific month (e.g. autopay discount).</li>
+          <li>Use per-month <strong>Cell credit</strong> on the Dashboard to reduce Cell's amount for a specific month (e.g. autopay discount); overflow rolls to next month.</li>
           <li>Schedule view size: 6 / 12 / 18 / 26 pay periods.</li>
           <li>Reset category drag-order with <em>Data → Reset category order</em>.</li>
           <li>Add more income sources any time — the timeline recomputes automatically.</li>
