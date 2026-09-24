@@ -2311,17 +2311,42 @@ route('dashboard', (root) => {
             const maxVal = Math.max(...avgWindow.map((p) => Math.max(p.total, payAmountAt(p.payDate))), 1);
             const w = 100 / avgWindow.length;
             const selectedInWindow = targetIdx - nextIdx;
+            // Highest / lowest set-aside indices for peak / valley markers
+            let peakIdx = 0, valleyIdx = 0;
+            for (let i = 1; i < avgWindow.length; i++) {
+              if (avgWindow[i].total > avgWindow[peakIdx].total) peakIdx = i;
+              if (avgWindow[i].total < avgWindow[valleyIdx].total) valleyIdx = i;
+            }
+            // If all pays are equal, don't bother marking
+            const showPeakValley = avgWindow[peakIdx].total !== avgWindow[valleyIdx].total;
             const bars = avgWindow.map((p, i) => {
               const h = (p.total / maxVal) * 100;
               const inc = payAmountAt(p.payDate);
               const over = inc > 0 && p.total > inc;
               const sel = i === selectedInWindow;
+              const isPeak = showPeakValley && i === peakIdx;
+              const isValley = showPeakValley && i === valleyIdx;
               const barX = i*w + w*0.14;
               const barW = w*0.72;
               const fill = over ? 'var(--danger)' : (sel ? 'var(--good)' : 'var(--amber)');
               const stroke = sel ? 'var(--ink)' : 'none';
-              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="1.5" rx="1"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: set aside ${fmtUSD.format(p.total)} / income ${fmtUSD.format(inc)}</title></rect>`;
+              const tag = isPeak ? ' · PEAK' : isValley ? ' · LOW' : '';
+              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="1.5" rx="1"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: set aside ${fmtUSD.format(p.total)} / income ${fmtUSD.format(inc)}${tag}</title></rect>`;
             }).join('');
+            // Peak / valley markers — small triangle above the bar top
+            const marker = (i, dir) => {
+              if (!showPeakValley) return '';
+              const p = avgWindow[i];
+              const h = (p.total / maxVal) * 100;
+              const cx = (i * w + w * 0.5);
+              const yTop = 100 - h;
+              // Triangle above bar top, 6px tall via viewBox coords approximated
+              // Use text symbol (small, keeps things simple)
+              const color = dir === 'peak' ? 'var(--danger)' : 'var(--good)';
+              const sym = dir === 'peak' ? '▲' : '▼';
+              return `<text x="${cx.toFixed(3)}%" y="${yTop.toFixed(3)}%" dy="-2" text-anchor="middle" fill="${color}" font-size="9" font-family="var(--mono)">${sym}</text>`;
+            };
+            const peakValleyMarks = marker(peakIdx, 'peak') + marker(valleyIdx, 'valley');
             // Per-bar income tick marks (small horizontal line at income level)
             const payLine = avgWindow.map((p, i) => {
               const inc = payAmountAt(p.payDate);
@@ -2345,7 +2370,7 @@ route('dashboard', (root) => {
               <div class="card">
                 <h2 class="accent">Cash-flow forecast · next ${avgWindow.length} pays</h2>
                 <div style="position:relative; height:120px; margin-top:8px;">
-                  <svg width="100%" height="100%" preserveAspectRatio="none" style="display:block; overflow:visible;">${bars}${payLine}${avgLine}</svg>
+                  <svg width="100%" height="100%" preserveAspectRatio="none" style="display:block; overflow:visible;">${bars}${payLine}${avgLine}${peakValleyMarks}</svg>
                 </div>
                 <div style="position:relative; height:16px; margin-top:2px;">
                   <svg width="100%" height="100%" style="display:block; overflow:visible;">${labels}</svg>
@@ -3941,7 +3966,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v78 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v79 · ledger edition</p>
       </div>
     </div>
 
