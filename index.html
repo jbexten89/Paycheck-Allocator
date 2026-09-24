@@ -2644,6 +2644,17 @@ route('dashboard', (root) => {
                       paychecksInCycle: it.paychecksInCycle
                     };
                   });
+                  // Also include any virtual items that aren't real bills (e.g. sinking-fund goals)
+                  for (const it of nextItems) {
+                    if (State.bills.some((b) => b.id === it.billId)) continue;
+                    billsToRender.push({
+                      billId: it.billId, name: it.name, dueDate: it.dueDate, amount: it.amount,
+                      category: it.category || 'Uncategorized',
+                      payIdxInCycle: it.payIdxInCycle,
+                      paychecksInCycle: it.paychecksInCycle,
+                      isGoal: it.isGoal
+                    });
+                  }
                 } else {
                   // Off: only rows with actual allocation this pay
                   billsToRender = nextItems.filter((it) => it.amount > 0).map((it) => ({
@@ -4080,7 +4091,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v80 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v81 · ledger edition</p>
       </div>
     </div>
 
