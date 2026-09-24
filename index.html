@@ -1325,50 +1325,84 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
     }
   }
-  // Goal spillover — cap goal set-aside at (income − non-goal items); roll the
-  // unfunded goal amount to the next pay as a synthetic "Goal catch-up" item.
-  // Bills are never scaled by this; only goal items shrink when a pay is tight.
+  // Spillover — cap each pay's set-aside at income; roll shortfall to next pay.
+  // Two-stage: goals shrink first (they're discretionary); if bills alone still
+  // exceed income, bills scale down too. Any unfunded amount carries forward as
+  // a synthetic catch-up item so nothing gets silently dropped.
   if (typeof State !== 'undefined' && State.spilloverEnabled && State.mergedPayTimeline) {
     const incMap = new Map();
     for (const t of State.mergedPayTimeline(perPaycheck.length + 4)) {
       incMap.set(toISO(t.payDate), t.amount);
     }
     let carry = 0;
+    let carryFromGoals = 0;    // portion of carry originally from goals
+    let carryFromBills = 0;    // portion originally from bills
     let prevDateKey = '';
     for (let i = 0; i < perPaycheck.length; i++) {
       const p = perPaycheck[i];
-      // Inject prior carry as a goal-flavored item on this pay
-      if (carry > 0) {
+      // Inject prior carry: a goal-flavored catch-up (goal portion) and/or
+      // bill-flavored catch-up (bill portion). Kept separate so the goal-first
+      // scaling rule below stays coherent.
+      if (carryFromGoals > 0) {
         p.items.push({
           billId: 'goal-carry:' + i,
           name: 'Goal catch-up from ' + (prevDateKey ? fmtDateShort.format(parseISO(prevDateKey)) : 'prior pay'),
           color: '#8B5CF6',
-          amount: carry,
-          runningBalance: carry,
+          amount: carryFromGoals,
+          runningBalance: carryFromGoals,
           dueDate: p.payDate,
-          paychecksInCycle: 1,
-          payIdxInCycle: 1,
-          isGoal: true,
-          isCarry: true,
-          category: 'Goals'
+          paychecksInCycle: 1, payIdxInCycle: 1,
+          isGoal: true, isCarry: true, category: 'Goals'
         });
-        p.total += carry;
-        carry = 0;
+        p.total += carryFromGoals;
       }
+      if (carryFromBills > 0) {
+        p.items.push({
+          billId: 'bill-carry:' + i,
+          name: 'Bill catch-up from ' + (prevDateKey ? fmtDateShort.format(parseISO(prevDateKey)) : 'prior pay'),
+          color: '#EF4444',
+          amount: carryFromBills,
+          runningBalance: carryFromBills,
+          dueDate: p.payDate,
+          paychecksInCycle: 1, payIdxInCycle: 1,
+          isCarry: true, category: 'Deferred'
+        });
+        p.total += carryFromBills;
+      }
+      carry = 0; carryFromGoals = 0; carryFromBills = 0;
       prevDateKey = toISO(p.payDate);
       const inc = incMap.get(toISO(p.payDate)) || 0;
       if (inc <= 0 || p.total <= inc) continue;
+
+      // Stage 1: shrink goal items to fit within (income - non-goal total)
       const goalItems = p.items.filter((it) => it.isGoal);
-      if (!goalItems.length) continue;
-      const goalTotal = goalItems.reduce((s, it) => s + it.amount, 0);
-      const nonGoalTotal = p.total - goalTotal;
+      const nonGoalItems = p.items.filter((it) => !it.isGoal);
+      let goalTotal = goalItems.reduce((s, it) => s + it.amount, 0);
+      let nonGoalTotal = nonGoalItems.reduce((s, it) => s + it.amount, 0);
       const availForGoals = Math.max(0, inc - nonGoalTotal);
-      if (goalTotal <= availForGoals) continue;
-      const scale = goalTotal > 0 ? (availForGoals / goalTotal) : 0;
-      for (const it of goalItems) it.amount *= scale;
-      const funded = availForGoals;
-      carry = goalTotal - funded;
-      p.total = nonGoalTotal + funded;
+      if (goalTotal > availForGoals && goalItems.length) {
+        const scale = goalTotal > 0 ? (availForGoals / goalTotal) : 0;
+        for (const it of goalItems) it.amount *= scale;
+        carryFromGoals = goalTotal - availForGoals;
+        goalTotal = availForGoals;
+      }
+
+      // Stage 2: bills alone exceed income → scale non-goal items too
+      if (nonGoalTotal > inc && nonGoalItems.length) {
+        const scale = nonGoalTotal > 0 ? (inc / nonGoalTotal) : 0;
+        for (const it of nonGoalItems) it.amount *= scale;
+        carryFromBills = nonGoalTotal - inc;
+        nonGoalTotal = inc;
+        // Goals get nothing on a pay whose bills alone maxed the income
+        if (goalTotal > 0 && goalItems.length) {
+          for (const it of goalItems) it.amount = 0;
+          carryFromGoals += goalTotal;
+          goalTotal = 0;
+        }
+      }
+
+      p.total = nonGoalTotal + goalTotal;
+      carry = carryFromGoals + carryFromBills;
     }
   }
   // Rewrite payIdxInCycle / paychecksInCycle so the ratio reflects the pays
@@ -3954,7 +3988,7 @@ route('settings', (root) => {
         </div>
         <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
           <input id="spillover-enable" type="checkbox" ${State.spilloverEnabled ? 'checked' : ''} style="width:auto;" />
-          <label for="spillover-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Cap goal set-aside at income; roll unfunded amount to next pay</label>
+          <label for="spillover-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Cap set-aside at income; roll shortfall to next pay (goals trim first, then bills)</label>
         </div>
       </div>
       <div class="card">
@@ -4175,7 +4209,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v89 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v90 · ledger edition</p>
       </div>
     </div>
 
