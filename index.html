@@ -1987,7 +1987,7 @@ const State = {
     }
     const ordered = (this.catOrder || []).filter((c) => present.has(c));
     // Preferred default order for known categories (case-insensitive).
-    const preferred = ['Monthly', 'Flexible', 'Non-Monthly', 'Fun Stuff', '3D Printing', 'Subscriptions', 'Maint Home', 'Vehicles'];
+    const preferred = ['Goals', 'Monthly', 'Flexible', 'Non-Monthly', 'Fun Stuff', '3D Printing', 'Subscriptions', 'Maint Home', 'Vehicles'];
     const prefIdx = new Map(preferred.map((p, i) => [p.toLowerCase(), i]));
     const rest = [...present].filter((c) => !ordered.includes(c))
       .sort((a, b) => {
@@ -2727,8 +2727,14 @@ route('dashboard', (root) => {
                 for (const it of billsToRender) (byCat[it.category] ||= []).push(it);
                 const known = State.orderedCategories().filter((c) => byCat[c]);
                 const knownSet = new Set(known);
-                const catNames = known.slice();
+                let catNames = known.slice();
                 for (const c of Object.keys(byCat)) if (!knownSet.has(c)) catNames.push(c);
+                // Any category used by a goal floats to the top
+                const goalCats = new Set((State.goals || []).map((g) => (g.category || 'Goals').toLowerCase()));
+                catNames = [
+                  ...catNames.filter((c) => goalCats.has(c.toLowerCase())),
+                  ...catNames.filter((c) => !goalCats.has(c.toLowerCase()))
+                ];
                 const rowsHtml = catNames.map((cat) => {
                   const items = byCat[cat];
                   const orderIdx = new Map(State.orderedBillsInCategory(cat).map((b, i) => [b.id, i]));
@@ -4155,7 +4161,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v86 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v87 · ledger edition</p>
       </div>
     </div>
 
