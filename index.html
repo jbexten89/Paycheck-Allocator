@@ -4091,7 +4091,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v81 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v82 · ledger edition</p>
       </div>
     </div>
 
@@ -4304,12 +4304,17 @@ route('settings', (root) => {
   if (yearViewEl) yearViewEl.onchange = (e) => { State.setYearViewEnabled(e.target.checked); };
   const leftoverViewEl = $('#leftover-view-enable');
   if (leftoverViewEl) leftoverViewEl.onchange = (e) => { State.setLeftoverViewEnabled(e.target.checked); };
+  const renavKeepScroll = () => {
+    const y = window.scrollY;
+    navigate();
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  };
   const addGoalBtn = $('#add-goal');
   if (addGoalBtn) addGoalBtn.onclick = () => {
     const today = new Date();
     const oneYear = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
     State.addGoal({ name: 'New goal', targetAmount: 0, targetDate: toISO(oneYear), savedSoFar: 0, category: 'Goals' });
-    navigate();
+    renavKeepScroll();
   };
   $$('#goals-list .goal-row').forEach((row) => {
     const id = row.dataset.id;
@@ -4319,14 +4324,14 @@ route('settings', (root) => {
         let val = inp.value;
         if (field === 'targetAmount' || field === 'savedSoFar') val = parseFloat(val) || 0;
         State.updateGoal(id, { [field]: val });
-        navigate();
+        renavKeepScroll();
       };
     });
     const rm = row.querySelector('[data-x="goal-remove"]');
     if (rm) rm.onclick = () => {
       if (!confirm('Remove this goal?')) return;
       State.removeGoal(id);
-      navigate();
+      renavKeepScroll();
     };
   });
   const roundEl = $('#round-set-aside');
