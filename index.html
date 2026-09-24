@@ -2438,9 +2438,11 @@ route('dashboard', (root) => {
             // If all pays are equal, don't bother marking
             const showPeakValley = avgWindow[peakIdx].total !== avgWindow[valleyIdx].total;
             const bars = avgWindow.map((p, i) => {
-              const h = (p.total / maxVal) * 100;
               const inc = payAmountAt(p.payDate);
               const over = inc > 0 && p.total > inc;
+              // Cap bar height at the paycheck value when set-aside would exceed it
+              const displayVal = over ? inc : p.total;
+              const h = (displayVal / maxVal) * 100;
               const sel = i === selectedInWindow;
               const isPeak = showPeakValley && i === peakIdx;
               const isValley = showPeakValley && i === valleyIdx;
@@ -2449,13 +2451,17 @@ route('dashboard', (root) => {
               const fill = over ? 'var(--danger)' : (sel ? 'var(--good)' : 'var(--amber)');
               const stroke = sel ? 'var(--ink)' : 'none';
               const tag = isPeak ? ' · PEAK' : isValley ? ' · LOW' : '';
-              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="1.5" rx="1"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: set aside ${fmtUSD.format(p.total)} / income ${fmtUSD.format(inc)}${tag}</title></rect>`;
+              const overTag = over ? ` · OVER by ${fmtUSD.format(p.total - inc)}` : '';
+              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="1.5" rx="1"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: set aside ${fmtUSD.format(p.total)} / income ${fmtUSD.format(inc)}${tag}${overTag}</title></rect>`;
             }).join('');
             // Peak / valley markers — small triangle above the bar top
             const marker = (i, dir) => {
               if (!showPeakValley) return '';
               const p = avgWindow[i];
-              const h = (p.total / maxVal) * 100;
+              const incMk = payAmountAt(p.payDate);
+              const overMk = incMk > 0 && p.total > incMk;
+              const displayValMk = overMk ? incMk : p.total;
+              const h = (displayValMk / maxVal) * 100;
               const cx = (i * w + w * 0.5);
               const yTop = 100 - h;
               // Triangle above bar top, 6px tall via viewBox coords approximated
@@ -4149,7 +4155,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v85 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v86 · ledger edition</p>
       </div>
     </div>
 
