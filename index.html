@@ -858,7 +858,7 @@ const STORE = {
   flexEditEnabled: 'paycheck_allocator.flex_edit_enabled',
   inlineEditCats: 'paycheck_allocator.inline_edit_cats',
   leftoverViewEnabled: 'paycheck_allocator.leftover_view_enabled',
-  goals: 'paycheck_allocator.goals'
+  sinkingFund: 'paycheck_allocator.sinking_fund'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1257,41 +1257,80 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
     }
   }
-  // Sinking-fund goals — inject a virtual item per goal on each pay in [today, targetDate].
-  // Per-pay contribution = (targetAmount - savedSoFar) / remainingPaysInWindow. Skips goals
-  // whose target date has passed or whose remaining amount is <= 0.
-  if (typeof State !== 'undefined' && Array.isArray(State.goals) && State.goals.length) {
+  // Sinking fund — single goal with two modes.
+  //   'target'    → spread (target - saved) evenly across pays in [start, targetDate]
+  //   'leftover'  → take percentOfLeftover of (income - non-fund set-aside) each pay
+  if (typeof State !== 'undefined' && State.sinkingFund && State.sinkingFund.enabled) {
+    const sf = State.sinkingFund;
     const today0 = new Date(); today0.setHours(0,0,0,0);
-    for (const g of State.goals) {
-      // Scheduled contribution needs both a date and a target amount.
-      // Goals without either are "leftover-only" — funded solely by excessPercent below.
-      if (!g || !g.targetDate || !(Number(g.targetAmount) > 0)) continue;
-      const target = parseISO(g.targetDate);
-      if (!target || target < today0) continue;
-      const remaining = Math.max(0, Number(g.targetAmount) - (Number(g.savedSoFar) || 0));
-      if (remaining <= 0) continue;
-      const startEffective = g.startDate ? (() => { const s = parseISO(g.startDate); return s > today0 ? s : today0; })() : today0;
-      const paysInWindow = perPaycheck.filter((p) => p.payDate >= startEffective && p.payDate <= target);
-      if (!paysInWindow.length) continue;
-      const perPay = remaining / paysInWindow.length;
-      const savedBase = Number(g.savedSoFar) || 0;
-      paysInWindow.forEach((p, idx) => {
-        p.items.push({
-          billId: 'goal:' + g.id,
-          name: g.name,
-          color: '#8B5CF6',
-          amount: perPay,
-          // Cumulative saved after this pay = starting balance + N contributions
-          runningBalance: savedBase + perPay * (idx + 1),
-          dueDate: target,
-          paychecksInCycle: paysInWindow.length,
-          payIdxInCycle: idx + 1,
-          isGoal: true,
-          category: g.category || 'Goals',
-          goalTarget: Number(g.targetAmount) || 0
-        });
-        p.total += perPay;
-      });
+    const startEffective = sf.startDate
+      ? (() => { const s = parseISO(sf.startDate); return s > today0 ? s : today0; })()
+      : today0;
+    const category = sf.category || 'Goals';
+    const name = sf.name || 'Sinking Fund';
+
+    if (sf.mode === 'target') {
+      if (sf.targetDate && Number(sf.targetAmount) > 0) {
+        const target = parseISO(sf.targetDate);
+        if (target && target >= today0) {
+          const remaining = Math.max(0, Number(sf.targetAmount) - (Number(sf.savedSoFar) || 0));
+          if (remaining > 0) {
+            const paysInWindow = perPaycheck.filter((p) => p.payDate >= startEffective && p.payDate <= target);
+            if (paysInWindow.length) {
+              const perPay = remaining / paysInWindow.length;
+              const savedBase = Number(sf.savedSoFar) || 0;
+              paysInWindow.forEach((p, idx) => {
+                p.items.push({
+                  billId: 'sink',
+                  name,
+                  color: '#8B5CF6',
+                  amount: perPay,
+                  runningBalance: savedBase + perPay * (idx + 1),
+                  dueDate: target,
+                  paychecksInCycle: paysInWindow.length,
+                  payIdxInCycle: idx + 1,
+                  isGoal: true,
+                  category,
+                  goalTarget: Number(sf.targetAmount) || 0
+                });
+                p.total += perPay;
+              });
+            }
+          }
+        }
+      }
+    } else if (sf.mode === 'leftover' && State.mergedPayTimeline) {
+      const pct = Math.max(0, Math.min(100, Number(sf.percentOfLeftover) || 0));
+      if (pct > 0) {
+        const incMap = new Map();
+        for (const t of State.mergedPayTimeline(perPaycheck.length + 4)) {
+          incMap.set(toISO(t.payDate), t.amount);
+        }
+        let cumulative = Number(sf.savedSoFar) || 0;
+        for (const p of perPaycheck) {
+          if (p.payDate < startEffective) continue;
+          const inc = incMap.get(toISO(p.payDate)) || 0;
+          if (inc <= 0) continue;
+          const leftover = inc - p.total;
+          if (leftover <= 0) continue;
+          const add = leftover * (pct / 100);
+          if (add <= 0.005) continue;
+          cumulative += add;
+          p.items.push({
+            billId: 'sink',
+            name,
+            color: '#8B5CF6',
+            amount: add,
+            runningBalance: cumulative,
+            dueDate: p.payDate,
+            paychecksInCycle: 1,
+            payIdxInCycle: 1,
+            isGoal: true,
+            category
+          });
+          p.total += add;
+        }
+      }
     }
   }
   // Per-pay-date allocation overrides — user-set amount for bills in categories
@@ -1516,9 +1555,24 @@ const State = {
     catch { this.dueSoonCatsOff = new Set(); }
     this.yearViewEnabled = localStorage.getItem(STORE.yearViewEnabled) !== '0';
     this.leftoverViewEnabled = localStorage.getItem(STORE.leftoverViewEnabled) !== '0';
-    try { this.goals = JSON.parse(localStorage.getItem(STORE.goals) || '[]') || []; }
-    catch { this.goals = []; }
-    // Clean up removed spillover flag
+    // Single sinking fund. Modes: 'target' (spread target across pays) or 'leftover' (% of each pay's leftover).
+    const defaultSink = {
+      enabled: false,
+      name: 'Sinking Fund',
+      category: 'Goals',
+      mode: 'target',
+      targetAmount: 0,
+      targetDate: '',
+      startDate: '',
+      savedSoFar: 0,
+      percentOfLeftover: 0
+    };
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORE.sinkingFund) || 'null');
+      this.sinkingFund = raw && typeof raw === 'object' ? { ...defaultSink, ...raw } : { ...defaultSink };
+    } catch { this.sinkingFund = { ...defaultSink }; }
+    // Clean up removed multi-goal + spillover storage
+    try { localStorage.removeItem('paycheck_allocator.goals'); } catch {}
     try { localStorage.removeItem('paycheck_allocator.spillover_enabled'); } catch {}
     this.roundSetAside = localStorage.getItem(STORE.roundSetAside) === '1';
     // Which shapes the Optimize button is allowed to try. Default: all except bi-monthly-rate.
@@ -1683,31 +1737,10 @@ const State = {
   },
   setYearViewEnabled(v) { this.yearViewEnabled = !!v; localStorage.setItem(STORE.yearViewEnabled, v ? '1' : '0'); },
   setLeftoverViewEnabled(v) { this.leftoverViewEnabled = !!v; localStorage.setItem(STORE.leftoverViewEnabled, v ? '1' : '0'); },
-  saveGoals() { localStorage.setItem(STORE.goals, JSON.stringify(this.goals)); },
-  addGoal(g) {
-    const item = {
-      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now() + Math.random()),
-      name: (g.name || 'Goal').toString(),
-      category: (g.category || 'Goals').toString(),
-      targetAmount: Number(g.targetAmount) || 0,
-      targetDate: g.targetDate || '',
-      startDate: g.startDate || '',
-      savedSoFar: Number(g.savedSoFar) || 0,
-      createdAt: new Date().toISOString()
-    };
-    this.goals.push(item);
-    this.saveGoals();
-    return item.id;
-  },
-  updateGoal(id, patch) {
-    const i = this.goals.findIndex((x) => x.id === id);
-    if (i < 0) return;
-    this.goals[i] = { ...this.goals[i], ...patch };
-    this.saveGoals();
-  },
-  removeGoal(id) {
-    this.goals = this.goals.filter((x) => x.id !== id);
-    this.saveGoals();
+  saveSinkingFund() { localStorage.setItem(STORE.sinkingFund, JSON.stringify(this.sinkingFund)); },
+  updateSinkingFund(patch) {
+    this.sinkingFund = { ...this.sinkingFund, ...patch };
+    this.saveSinkingFund();
   },
   setRoundSetAside(v) { this.roundSetAside = !!v; localStorage.setItem(STORE.roundSetAside, v ? '1' : '0'); },
   setOptimizeShapeAllowed(shape, allowed) {
@@ -1939,11 +1972,9 @@ const State = {
     for (const b of this.bills) {
       present.add((b.category && b.category.trim()) || 'Uncategorized');
     }
-    // Include categories used by any sinking-fund goal so their virtual items group properly
-    if (Array.isArray(this.goals)) {
-      for (const g of this.goals) {
-        if (g && g.category) present.add(g.category.trim() || 'Goals');
-      }
+    // Include the sinking-fund's category so its virtual item groups properly
+    if (this.sinkingFund && this.sinkingFund.enabled && this.sinkingFund.category) {
+      present.add(this.sinkingFund.category.trim() || 'Goals');
     }
     const ordered = (this.catOrder || []).filter((c) => present.has(c));
     // Preferred default order for known categories (case-insensitive).
@@ -2011,7 +2042,7 @@ const Sync = {
       dueSoonCatsOff: [...State.dueSoonCatsOff],
       yearViewEnabled: State.yearViewEnabled,
       leftoverViewEnabled: State.leftoverViewEnabled,
-      goals: State.goals,
+      sinkingFund: State.sinkingFund,
       roundSetAside: State.roundSetAside,
       optimizeShapes: [...State.optimizeShapes],
       flexOverrides: State.flexOverrides,
@@ -2051,7 +2082,7 @@ const Sync = {
     }
     if (typeof p.yearViewEnabled === 'boolean') { State.setYearViewEnabled(p.yearViewEnabled); }
     if (typeof p.leftoverViewEnabled === 'boolean') { State.setLeftoverViewEnabled(p.leftoverViewEnabled); }
-    if (Array.isArray(p.goals)) { State.goals = p.goals; State.saveGoals(); }
+    if (p.sinkingFund && typeof p.sinkingFund === 'object') { State.sinkingFund = { ...State.sinkingFund, ...p.sinkingFund }; State.saveSinkingFund(); }
     if (typeof p.roundSetAside === 'boolean') { State.setRoundSetAside(p.roundSetAside); }
     if (Array.isArray(p.optimizeShapes)) {
       State.optimizeShapes = new Set(p.optimizeShapes);
@@ -2691,8 +2722,9 @@ route('dashboard', (root) => {
                 const knownSet = new Set(known);
                 let catNames = known.slice();
                 for (const c of Object.keys(byCat)) if (!knownSet.has(c)) catNames.push(c);
-                // Any category used by a goal floats to the top
-                const goalCats = new Set((State.goals || []).map((g) => (g.category || 'Goals').toLowerCase()));
+                // The sinking-fund category floats to the top
+                const goalCats = new Set();
+                if (State.sinkingFund && State.sinkingFund.enabled) goalCats.add((State.sinkingFund.category || 'Goals').toLowerCase());
                 catNames = [
                   ...catNames.filter((c) => goalCats.has(c.toLowerCase())),
                   ...catNames.filter((c) => !goalCats.has(c.toLowerCase()))
@@ -3907,53 +3939,76 @@ route('settings', (root) => {
         </div>
       </div>
       <div class="card">
-        <h2>Sinking-fund goals</h2>
-        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">Save toward a target by a given date. Each goal spreads its remaining amount evenly across every paycheck between today and its target date, so it shows up alongside your bills in the breakdown.</div>
-        <div id="goals-list" style="display:flex; flex-direction:column; gap:10px;">
-          ${(State.goals || []).map((g) => {
-            const remaining = Math.max(0, Number(g.targetAmount || 0) - Number(g.savedSoFar || 0));
-            const pct = Number(g.targetAmount) > 0 ? Math.min(100, Math.round((Number(g.savedSoFar || 0) / Number(g.targetAmount)) * 100)) : 0;
-            return `
-            <div class="goal-row" data-id="${g.id}" style="position:relative; border:1px solid var(--hairline); border-radius:10px; padding:10px;">
-              <button class="btn btn-ghost" data-x="goal-remove" title="Remove goal" style="position:absolute; top:-2px; right:-2px; padding:0 4px; font-size:12px; line-height:1;">✕</button>
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+        <h2>Sinking fund</h2>
+        <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">Set aside for one savings goal — either a target amount by a given date, or a % of each pay's leftover.</div>
+        ${(() => {
+          const sf = State.sinkingFund || {};
+          const pct = Number(sf.targetAmount) > 0 ? Math.min(100, Math.round((Number(sf.savedSoFar || 0) / Number(sf.targetAmount)) * 100)) : 0;
+          const remaining = Math.max(0, Number(sf.targetAmount || 0) - Number(sf.savedSoFar || 0));
+          return `
+          <div class="sink-form" style="border:1px solid var(--hairline); border-radius:10px; padding:10px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+              <input id="sink-enable" type="checkbox" ${sf.enabled ? 'checked' : ''} style="width:auto;" />
+              <label for="sink-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Enable sinking fund</label>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <div style="grid-column: span 2;">
+                <label style="font-size:11px;">Name</label>
+                <input data-sf="name" type="text" value="${escapeAttr(sf.name || 'Sinking Fund')}" placeholder="e.g. Vacation" />
+              </div>
+              <div>
+                <label style="font-size:11px;">Category</label>
+                <input data-sf="category" type="text" value="${escapeAttr(sf.category || 'Goals')}" placeholder="Goals" />
+              </div>
+              <div>
+                <label style="font-size:11px;">Mode</label>
+                <select data-sf="mode">
+                  <option value="target" ${sf.mode === 'target' ? 'selected' : ''}>Target amount by date</option>
+                  <option value="leftover" ${sf.mode === 'leftover' ? 'selected' : ''}>% of each pay's leftover</option>
+                </select>
+              </div>
+              ${sf.mode === 'leftover' ? `
                 <div style="grid-column: span 2;">
-                  <label style="font-size:11px;">Name</label>
-                  <input data-gf="name" type="text" value="${escapeAttr(g.name || '')}" placeholder="e.g. Vacation" />
-                </div>
-                <div>
-                  <label style="font-size:11px;">Target amount</label>
-                  <input data-gf="targetAmount" type="number" min="0" step="0.01" value="${g.targetAmount || ''}" placeholder="e.g. 2000" />
-                </div>
-                <div>
-                  <label style="font-size:11px;">Target date</label>
-                  <input data-gf="targetDate" type="date" value="${g.targetDate || ''}" />
+                  <label style="font-size:11px;">% of leftover per pay</label>
+                  <input data-sf="percentOfLeftover" type="number" min="0" max="100" step="1" value="${sf.percentOfLeftover || 0}" placeholder="0" />
+                  <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">Each pay's leftover (income − bills) sends this % to the fund.</div>
                 </div>
                 <div>
                   <label style="font-size:11px;">Start date (optional)</label>
-                  <input data-gf="startDate" type="date" value="${g.startDate || ''}" />
+                  <input data-sf="startDate" type="date" value="${sf.startDate || ''}" />
                 </div>
                 <div>
                   <label style="font-size:11px;">Saved so far</label>
-                  <input data-gf="savedSoFar" type="number" min="0" step="0.01" value="${g.savedSoFar || 0}" />
+                  <input data-sf="savedSoFar" type="number" min="0" step="0.01" value="${sf.savedSoFar || 0}" />
+                </div>
+              ` : `
+                <div>
+                  <label style="font-size:11px;">Target amount</label>
+                  <input data-sf="targetAmount" type="number" min="0" step="0.01" value="${sf.targetAmount || ''}" placeholder="e.g. 2000" />
                 </div>
                 <div>
-                  <label style="font-size:11px;">Category</label>
-                  <input data-gf="category" type="text" value="${escapeAttr(g.category || 'Goals')}" placeholder="Goals" />
+                  <label style="font-size:11px;">Target date</label>
+                  <input data-sf="targetDate" type="date" value="${sf.targetDate || ''}" />
                 </div>
-              </div>
-              <div style="margin-top:8px;">
+                <div>
+                  <label style="font-size:11px;">Start date (optional)</label>
+                  <input data-sf="startDate" type="date" value="${sf.startDate || ''}" />
+                </div>
+                <div>
+                  <label style="font-size:11px;">Saved so far</label>
+                  <input data-sf="savedSoFar" type="number" min="0" step="0.01" value="${sf.savedSoFar || 0}" />
+                </div>
+              `}
+            </div>
+            ${sf.mode === 'target' && Number(sf.targetAmount) > 0 ? `
+              <div style="margin-top:10px;">
                 <div style="height:6px; background:var(--paper); border-radius:3px; overflow:hidden;">
                   <div style="height:100%; width:${pct}%; background:#8B5CF6;"></div>
                 </div>
                 <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">${pct}% saved · ${fmtUSD.format(remaining)} remaining</div>
-              </div>
-            </div>`;
-          }).join('')}
-        </div>
-        <div style="margin-top:10px;">
-          <button class="btn" id="add-goal">+ Add goal</button>
-        </div>
+              </div>` : ''}
+          </div>`;
+        })()}
         <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
           <input id="round-set-aside" type="checkbox" ${State.roundSetAside ? 'checked' : ''} style="width:auto;" />
           <label for="round-set-aside" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Round set-aside amounts to the nearest $1</label>
@@ -4128,7 +4183,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v95 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v96 · ledger edition</p>
       </div>
     </div>
 
@@ -4346,28 +4401,18 @@ route('settings', (root) => {
     navigate();
     requestAnimationFrame(() => window.scrollTo(0, y));
   };
-  const addGoalBtn = $('#add-goal');
-  if (addGoalBtn) addGoalBtn.onclick = () => {
-    const today = new Date();
-    const oneYear = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
-    State.addGoal({ name: 'New goal', targetAmount: 0, targetDate: toISO(oneYear), savedSoFar: 0, category: 'Goals' });
+  const sinkEnable = $('#sink-enable');
+  if (sinkEnable) sinkEnable.onchange = () => {
+    State.updateSinkingFund({ enabled: sinkEnable.checked });
     renavKeepScroll();
   };
-  $$('#goals-list .goal-row').forEach((row) => {
-    const id = row.dataset.id;
-    row.querySelectorAll('[data-gf]').forEach((inp) => {
-      inp.onchange = () => {
-        const field = inp.dataset.gf;
-        let val = inp.value;
-        if (field === 'targetAmount' || field === 'savedSoFar') val = parseFloat(val) || 0;
-        State.updateGoal(id, { [field]: val });
-        renavKeepScroll();
-      };
-    });
-    const rm = row.querySelector('[data-x="goal-remove"]');
-    if (rm) rm.onclick = () => {
-      if (!confirm('Remove this goal?')) return;
-      State.removeGoal(id);
+  $$('[data-sf]').forEach((inp) => {
+    inp.onchange = () => {
+      const field = inp.dataset.sf;
+      let val = inp.value;
+      if (field === 'targetAmount' || field === 'savedSoFar') val = parseFloat(val) || 0;
+      if (field === 'percentOfLeftover') val = Math.max(0, Math.min(100, parseFloat(val) || 0));
+      State.updateSinkingFund({ [field]: val });
       renavKeepScroll();
     };
   });
@@ -4498,7 +4543,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled','saveGoals','addGoal','updateGoal','removeGoal'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled','saveSinkingFund','updateSinkingFund'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
