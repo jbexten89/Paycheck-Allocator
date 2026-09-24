@@ -1742,6 +1742,45 @@ const State = {
     this.incomes = this.incomes.filter((x) => x.id !== id);
     this.saveIncomes();
   },
+  addIncomeChange(incomeId, effectiveDate, amount) {
+    const i = this.incomes.findIndex((x) => x.id === incomeId);
+    if (i < 0 || !effectiveDate) return;
+    const inc = this.incomes[i];
+    inc.changes = Array.isArray(inc.changes) ? inc.changes.slice() : [];
+    // Replace any existing change on the same date
+    inc.changes = inc.changes.filter((c) => c && c.effectiveDate !== effectiveDate);
+    inc.changes.push({ effectiveDate, amount: Number(amount) || 0 });
+    inc.changes.sort((a, b) => (a.effectiveDate < b.effectiveDate ? -1 : 1));
+    this.incomes[i] = inc;
+    this.saveIncomes();
+  },
+  removeIncomeChange(incomeId, effectiveDate) {
+    const i = this.incomes.findIndex((x) => x.id === incomeId);
+    if (i < 0) return;
+    const inc = this.incomes[i];
+    if (!Array.isArray(inc.changes)) return;
+    inc.changes = inc.changes.filter((c) => c && c.effectiveDate !== effectiveDate);
+    if (!inc.changes.length) delete inc.changes;
+    this.incomes[i] = inc;
+    this.saveIncomes();
+  },
+  // Amount for an income effective on a given payDate. Scheduled changes:
+  // inc.changes = [{ effectiveDate: 'YYYY-MM-DD', amount: N }, ...]
+  // The latest change whose effectiveDate <= payDate wins; else inc.amount.
+  effectiveIncomeAmount(inc, payDate) {
+    const base = Number(inc.amount) || 0;
+    if (!Array.isArray(inc.changes) || !inc.changes.length || !payDate) return base;
+    let winner = null;
+    for (const c of inc.changes) {
+      if (!c || !c.effectiveDate) continue;
+      try {
+        if (parseISO(c.effectiveDate) <= payDate) {
+          if (!winner || parseISO(c.effectiveDate) > parseISO(winner.effectiveDate)) winner = c;
+        }
+      } catch {}
+    }
+    return winner ? (Number(winner.amount) || 0) : base;
+  },
   // Merged pay-date timeline across all income sources.
   mergedPayTimeline(count = 156) {
     const list = (this.incomes && this.incomes.length)
@@ -1755,8 +1794,9 @@ const State = {
         const key = toISO(d);
         if (!byDay.has(key)) byDay.set(key, { payDate: d, amount: 0, sources: [] });
         const grp = byDay.get(key);
-        grp.amount += Number(inc.amount) || 0;
-        grp.sources.push({ name: inc.name, amount: Number(inc.amount) || 0 });
+        const amt = this.effectiveIncomeAmount(inc, d);
+        grp.amount += amt;
+        grp.sources.push({ name: inc.name, amount: amt });
       }
     }
     return [...byDay.values()].sort((a, b) => a.payDate - b.payDate).slice(0, count);
@@ -3680,6 +3720,22 @@ route('settings', (root) => {
                   <label style="font-size:11px;">Next / last payday</label>
                   <input data-f="payStart" type="date" value="${inc.payStart || ''}" />
                 </div>
+                <div style="grid-column: span 2; margin-top:6px; padding-top:8px; border-top:1px solid var(--hairline);">
+                  <label style="font-size:11px; margin-bottom:4px;">Scheduled amount changes</label>
+                  <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-bottom:6px;">Each row applies its amount to pays on/after its date, until the next change.</div>
+                  ${(inc.changes || []).map((c) => `
+                    <div class="income-change-row" data-eff="${c.effectiveDate}" style="display:grid; grid-template-columns: 1fr 1fr auto; gap:6px; align-items:center; margin-bottom:4px;">
+                      <input type="date" class="chg-date" value="${c.effectiveDate}" data-orig="${c.effectiveDate}" />
+                      <input type="number" min="0" step="0.01" class="chg-amount" value="${c.amount}" placeholder="e.g. 2700" />
+                      <button class="btn btn-ghost chg-remove" title="Remove change">✕</button>
+                    </div>
+                  `).join('')}
+                  <div style="display:grid; grid-template-columns: 1fr 1fr auto; gap:6px; margin-top:4px;">
+                    <input type="date" class="chg-new-date" placeholder="Date" />
+                    <input type="number" min="0" step="0.01" class="chg-new-amount" placeholder="New amount" />
+                    <button class="btn chg-new-add">Add</button>
+                  </div>
+                </div>
               </div>
               <button class="btn btn-ghost" data-x="remove" aria-label="Remove income" title="Remove" style="align-self:start;">✕</button>
             </div>
@@ -3883,7 +3939,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v75 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v76 · ledger edition</p>
       </div>
     </div>
 
@@ -4032,6 +4088,34 @@ route('settings', (root) => {
       if ((State.incomes || []).length <= 1) { alert('Keep at least one income source.'); return; }
       if (!confirm('Remove this income source?')) return;
       State.removeIncome(id);
+      navigate();
+    };
+    // Existing scheduled-change rows: edit date or amount
+    row.querySelectorAll('.income-change-row').forEach((chgRow) => {
+      const orig = chgRow.dataset.eff;
+      const dateEl = chgRow.querySelector('.chg-date');
+      const amtEl = chgRow.querySelector('.chg-amount');
+      const applyEdit = () => {
+        const newDate = dateEl.value;
+        const newAmt = parseFloat(amtEl.value) || 0;
+        if (!newDate) return;
+        // Remove old, add new (order + dedupe handled inside)
+        State.removeIncomeChange(id, orig);
+        State.addIncomeChange(id, newDate, newAmt);
+        navigate();
+      };
+      if (dateEl) dateEl.onchange = applyEdit;
+      if (amtEl) amtEl.onchange = applyEdit;
+      const rmChg = chgRow.querySelector('.chg-remove');
+      if (rmChg) rmChg.onclick = () => { State.removeIncomeChange(id, orig); navigate(); };
+    });
+    // New scheduled change: date + amount + Add button
+    const newAddBtn = row.querySelector('.chg-new-add');
+    if (newAddBtn) newAddBtn.onclick = () => {
+      const d = row.querySelector('.chg-new-date').value;
+      const a = parseFloat(row.querySelector('.chg-new-amount').value);
+      if (!d || !isFinite(a)) { alert('Enter a date and an amount.'); return; }
+      State.addIncomeChange(id, d, a);
       navigate();
     };
   });
@@ -4195,7 +4279,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
