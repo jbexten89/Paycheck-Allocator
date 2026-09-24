@@ -1271,7 +1271,8 @@ function computeAllocations(bills, payDates, opts = {}) {
       if (!target || target < today0) continue;
       const remaining = Math.max(0, Number(g.targetAmount) - (Number(g.savedSoFar) || 0));
       if (remaining <= 0) continue;
-      const paysInWindow = perPaycheck.filter((p) => p.payDate >= today0 && p.payDate <= target);
+      const startEffective = g.startDate ? (() => { const s = parseISO(g.startDate); return s > today0 ? s : today0; })() : today0;
+      const paysInWindow = perPaycheck.filter((p) => p.payDate >= startEffective && p.payDate <= target);
       if (!paysInWindow.length) continue;
       const perPay = remaining / paysInWindow.length;
       const savedBase = Number(g.savedSoFar) || 0;
@@ -1430,6 +1431,7 @@ function computeAllocations(bills, payDates, opts = {}) {
         if (leftover <= 0) continue;
         const targetDay = toISO(p.payDate);
         for (const g of boosters) {
+          if (g.startDate && targetDay < g.startDate) continue; // goal not yet active
           if (g.targetDate && targetDay > g.targetDate) continue; // dated goal already past
           const already = savedByGoal.get(g.id) || 0;
           const hasTarget = Number(g.targetAmount) > 0;
@@ -1829,6 +1831,7 @@ const State = {
       category: (g.category || 'Goals').toString(),
       targetAmount: Number(g.targetAmount) || 0,
       targetDate: g.targetDate || '',
+      startDate: g.startDate || '',
       savedSoFar: Number(g.savedSoFar) || 0,
       excessPercent: Math.max(0, Math.min(100, Number(g.excessPercent) || 0)),
       createdAt: new Date().toISOString()
@@ -4079,6 +4082,10 @@ route('settings', (root) => {
                   <input data-gf="targetDate" type="date" value="${g.targetDate || ''}" />
                 </div>
                 <div>
+                  <label style="font-size:11px;">Start date (optional)</label>
+                  <input data-gf="startDate" type="date" value="${g.startDate || ''}" />
+                </div>
+                <div>
                   <label style="font-size:11px;">Saved so far</label>
                   <input data-gf="savedSoFar" type="number" min="0" step="0.01" value="${g.savedSoFar || 0}" />
                 </div>
@@ -4281,7 +4288,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v92 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v93 · ledger edition</p>
       </div>
     </div>
 
