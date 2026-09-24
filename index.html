@@ -1264,10 +1264,12 @@ function computeAllocations(bills, payDates, opts = {}) {
   if (typeof State !== 'undefined' && Array.isArray(State.goals) && State.goals.length) {
     const today0 = new Date(); today0.setHours(0,0,0,0);
     for (const g of State.goals) {
-      if (!g || !g.targetDate) continue;
+      // Scheduled contribution needs both a date and a target amount.
+      // Goals without either are "leftover-only" — funded solely by excessPercent below.
+      if (!g || !g.targetDate || !(Number(g.targetAmount) > 0)) continue;
       const target = parseISO(g.targetDate);
       if (!target || target < today0) continue;
-      const remaining = Math.max(0, (Number(g.targetAmount) || 0) - (Number(g.savedSoFar) || 0));
+      const remaining = Math.max(0, Number(g.targetAmount) - (Number(g.savedSoFar) || 0));
       if (remaining <= 0) continue;
       const paysInWindow = perPaycheck.filter((p) => p.payDate >= today0 && p.payDate <= target);
       if (!paysInWindow.length) continue;
@@ -1409,7 +1411,10 @@ function computeAllocations(bills, payDates, opts = {}) {
   // that percentage of each pay's leftover (income - set-aside) toward the
   // goal. Stops adding once the goal's cumulative saved reaches its target.
   if (typeof State !== 'undefined' && Array.isArray(State.goals) && State.goals.length && State.mergedPayTimeline) {
-    const boosters = State.goals.filter((g) => g && Number(g.excessPercent) > 0 && Number(g.targetAmount) > 0 && g.targetDate);
+    // A booster only needs an excess%. Target amount and target date are optional:
+    // - no targetAmount → uncapped, keeps rolling forever
+    // - no targetDate → active on every pay indefinitely
+    const boosters = State.goals.filter((g) => g && Number(g.excessPercent) > 0);
     if (boosters.length) {
       const incMap = new Map();
       for (const t of State.mergedPayTimeline(perPaycheck.length + 4)) {
@@ -1425,9 +1430,10 @@ function computeAllocations(bills, payDates, opts = {}) {
         if (leftover <= 0) continue;
         const targetDay = toISO(p.payDate);
         for (const g of boosters) {
-          if (targetDay > g.targetDate) continue; // goal already past
+          if (g.targetDate && targetDay > g.targetDate) continue; // dated goal already past
           const already = savedByGoal.get(g.id) || 0;
-          const remaining = Math.max(0, Number(g.targetAmount) - already);
+          const hasTarget = Number(g.targetAmount) > 0;
+          const remaining = hasTarget ? Math.max(0, Number(g.targetAmount) - already) : Infinity;
           if (remaining <= 0) continue;
           const wanted = leftover * (Number(g.excessPercent) / 100);
           const add = Math.min(wanted, remaining, leftover);
@@ -1443,7 +1449,7 @@ function computeAllocations(bills, payDates, opts = {}) {
               color: '#8B5CF6',
               amount: add,
               runningBalance: already + add,
-              dueDate: parseISO(g.targetDate),
+              dueDate: g.targetDate ? parseISO(g.targetDate) : p.payDate,
               paychecksInCycle: 1,
               payIdxInCycle: 1,
               isGoal: true,
@@ -2874,9 +2880,12 @@ route('dashboard', (root) => {
                     let allocateCell;
                     if (editable) {
                       allocateCell = `<td class="total"><input class="flex-amt-input" type="number" step="0.01" min="0" value="${(it.amount || 0).toFixed(2)}" data-bill="${escapeAttr(it.billId)}" data-pay="${toISO(next.payDate)}" /></td>`;
-                    } else if (it.isGoal && typeof it.runningBalance === 'number' && it.goalTarget > 0) {
-                      // Show the cumulative saved-so-far after this contribution + target
-                      allocateCell = `<td class="total">${fmtUSD.format(it.amount)}<div class="hint" style="font-size:10px; color:var(--ink-muted); font-weight:400; margin-top:2px;">${fmtUSD.format(it.runningBalance)} / ${fmtUSD.format(it.goalTarget)}</div></td>`;
+                    } else if (it.isGoal && typeof it.runningBalance === 'number') {
+                      // Cumulative saved after this contribution. If a target exists, show / target.
+                      const cumHint = it.goalTarget > 0
+                        ? `${fmtUSD.format(it.runningBalance)} / ${fmtUSD.format(it.goalTarget)}`
+                        : `${fmtUSD.format(it.runningBalance)} saved`;
+                      allocateCell = `<td class="total">${fmtUSD.format(it.amount)}<div class="hint" style="font-size:10px; color:var(--ink-muted); font-weight:400; margin-top:2px;">${cumHint}</div></td>`;
                     } else {
                       allocateCell = `<td class="total">${fmtUSD.format(it.amount)}</td>`;
                     }
@@ -4062,11 +4071,11 @@ route('settings', (root) => {
                   <input data-gf="name" type="text" value="${escapeAttr(g.name || '')}" placeholder="e.g. Vacation" />
                 </div>
                 <div>
-                  <label style="font-size:11px;">Target amount</label>
+                  <label style="font-size:11px;">Target amount (optional)</label>
                   <input data-gf="targetAmount" type="number" min="0" step="0.01" value="${g.targetAmount || ''}" placeholder="e.g. 2000" />
                 </div>
                 <div>
-                  <label style="font-size:11px;">Target date</label>
+                  <label style="font-size:11px;">Target date (optional)</label>
                   <input data-gf="targetDate" type="date" value="${g.targetDate || ''}" />
                 </div>
                 <div>
@@ -4080,14 +4089,17 @@ route('settings', (root) => {
                 <div style="grid-column: span 2;">
                   <label style="font-size:11px;">Roll % of leftover into this goal</label>
                   <input data-gf="excessPercent" type="number" min="0" max="100" step="1" value="${g.excessPercent || 0}" placeholder="0" />
-                  <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">Any pay with leftover (income − bills − scheduled goal contribution) sends this % here, up to the target amount.</div>
+                  <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">Any pay with leftover (income − bills − scheduled goal contribution) sends this % here, up to the target amount. Leave target amount + date blank for an open-ended "spare change" bucket.</div>
                 </div>
               </div>
               <div style="margin-top:8px;">
-                <div style="height:6px; background:var(--paper); border-radius:3px; overflow:hidden;">
-                  <div style="height:100%; width:${pct}%; background:#8B5CF6;"></div>
-                </div>
-                <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">${pct}% saved · ${fmtUSD.format(remaining)} remaining</div>
+                ${Number(g.targetAmount) > 0
+                  ? `<div style="height:6px; background:var(--paper); border-radius:3px; overflow:hidden;">
+                       <div style="height:100%; width:${pct}%; background:#8B5CF6;"></div>
+                     </div>
+                     <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">${pct}% saved · ${fmtUSD.format(remaining)} remaining</div>`
+                  : `<div class="hint" style="font-size:11px; color:var(--ink-muted);">Open-ended: ${fmtUSD.format(Number(g.savedSoFar) || 0)} saved so far</div>`
+                }
               </div>
             </div>`;
           }).join('')}
@@ -4269,7 +4281,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v91 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v92 · ledger edition</p>
       </div>
     </div>
 
