@@ -3724,16 +3724,20 @@ route('settings', (root) => {
                   <label style="font-size:11px; margin-bottom:4px;">Scheduled amount changes</label>
                   <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-bottom:6px;">Each row applies its amount to pays on/after its date, until the next change.</div>
                   ${(inc.changes || []).map((c) => `
-                    <div class="income-change-row" data-eff="${c.effectiveDate}" style="display:grid; grid-template-columns: 1fr 1fr auto; gap:6px; align-items:center; margin-bottom:4px;">
+                    <div class="income-change-row" data-eff="${c.effectiveDate}" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; align-items:center; margin-bottom:6px;">
                       <input type="date" class="chg-date" value="${c.effectiveDate}" data-orig="${c.effectiveDate}" />
-                      <input type="number" min="0" step="0.01" class="chg-amount" value="${c.amount}" placeholder="e.g. 2700" />
-                      <button class="btn btn-ghost chg-remove" title="Remove change">✕</button>
+                      <div style="display:flex; gap:4px; min-width:0;">
+                        <input type="number" min="0" step="0.01" class="chg-amount" value="${c.amount}" placeholder="e.g. 2700" style="flex:1; min-width:0;" />
+                        <button class="btn btn-ghost chg-remove" title="Remove change" style="flex:0 0 auto; padding:6px 10px;">✕</button>
+                      </div>
                     </div>
                   `).join('')}
-                  <div style="display:grid; grid-template-columns: 1fr 1fr auto; gap:6px; margin-top:4px;">
+                  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:6px;">
                     <input type="date" class="chg-new-date" placeholder="Date" />
-                    <input type="number" min="0" step="0.01" class="chg-new-amount" placeholder="New amount" />
-                    <button class="btn chg-new-add">Add</button>
+                    <div style="display:flex; gap:4px; min-width:0;">
+                      <input type="number" min="0" step="0.01" class="chg-new-amount" placeholder="New amount" style="flex:1; min-width:0;" />
+                      <button class="btn chg-new-add" style="flex:0 0 auto; padding:6px 10px;">Add</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -3939,7 +3943,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v76 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v77 · ledger edition</p>
       </div>
     </div>
 
