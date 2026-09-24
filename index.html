@@ -1562,7 +1562,8 @@ const State = {
     this.leftoverViewEnabled = localStorage.getItem(STORE.leftoverViewEnabled) !== '0';
     try { this.goals = JSON.parse(localStorage.getItem(STORE.goals) || '[]') || []; }
     catch { this.goals = []; }
-    this.spilloverEnabled = localStorage.getItem(STORE.spilloverEnabled) === '1';
+    // Default ON: goals never push a pay past its income; excess rolls to next pay.
+    this.spilloverEnabled = localStorage.getItem(STORE.spilloverEnabled) !== '0';
     this.roundSetAside = localStorage.getItem(STORE.roundSetAside) === '1';
     // Which shapes the Optimize button is allowed to try. Default: all except bi-monthly-rate.
     const DEFAULT_OPT_SHAPES = ['spread','weighted-spread','single-cycle','first-cycle','first-two-of-three','last-two-of-three','monthly-rate'];
@@ -4174,7 +4175,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v88 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v89 · ledger edition</p>
       </div>
     </div>
 
