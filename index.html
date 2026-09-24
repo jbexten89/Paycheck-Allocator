@@ -858,7 +858,8 @@ const STORE = {
   flexEditEnabled: 'paycheck_allocator.flex_edit_enabled',
   inlineEditCats: 'paycheck_allocator.inline_edit_cats',
   leftoverViewEnabled: 'paycheck_allocator.leftover_view_enabled',
-  goals: 'paycheck_allocator.goals'
+  goals: 'paycheck_allocator.goals',
+  spilloverEnabled: 'paycheck_allocator.spillover_enabled'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1321,6 +1322,44 @@ function computeAllocations(bills, payDates, opts = {}) {
       }
     }
   }
+  // Spillover — cap each pay's total at income; roll shortage to next pay as a
+  // synthetic "From previous pay" item. Runs after goals + flexOverrides so
+  // it reflects the final planned allocation.
+  if (typeof State !== 'undefined' && State.spilloverEnabled && State.mergedPayTimeline) {
+    const incMap = new Map();
+    for (const t of State.mergedPayTimeline(perPaycheck.length + 4)) {
+      incMap.set(toISO(t.payDate), t.amount);
+    }
+    let carry = 0;
+    let prevDateKey = '';
+    for (let i = 0; i < perPaycheck.length; i++) {
+      const p = perPaycheck[i];
+      if (carry > 0) {
+        p.items.push({
+          billId: 'carry:' + i,
+          name: 'From ' + (prevDateKey ? fmtDateShort.format(parseISO(prevDateKey)) : 'previous pay'),
+          color: '#8B5CF6',
+          amount: carry,
+          runningBalance: carry,
+          dueDate: p.payDate,
+          paychecksInCycle: 1,
+          payIdxInCycle: 1,
+          isCarry: true,
+          category: 'Deferred'
+        });
+        p.total += carry;
+        carry = 0;
+      }
+      const inc = incMap.get(toISO(p.payDate)) || 0;
+      if (inc > 0 && p.total > inc) {
+        const scale = inc / p.total;
+        for (const it of p.items) it.amount *= scale;
+        carry = p.total - inc;
+        p.total = inc;
+      }
+      prevDateKey = toISO(p.payDate);
+    }
+  }
   // Rewrite payIdxInCycle / paychecksInCycle so the ratio reflects the pays
   // actually FUNDED for that cycle (amount > 0), not raw window pays. A bill
   // concentrated onto one pay by singleSmallMonthly / single-cycle shows 1/1.
@@ -1512,6 +1551,7 @@ const State = {
     this.leftoverViewEnabled = localStorage.getItem(STORE.leftoverViewEnabled) !== '0';
     try { this.goals = JSON.parse(localStorage.getItem(STORE.goals) || '[]') || []; }
     catch { this.goals = []; }
+    this.spilloverEnabled = localStorage.getItem(STORE.spilloverEnabled) === '1';
     this.roundSetAside = localStorage.getItem(STORE.roundSetAside) === '1';
     // Which shapes the Optimize button is allowed to try. Default: all except bi-monthly-rate.
     const DEFAULT_OPT_SHAPES = ['spread','weighted-spread','single-cycle','first-cycle','first-two-of-three','last-two-of-three','monthly-rate'];
@@ -1700,6 +1740,7 @@ const State = {
     this.goals = this.goals.filter((x) => x.id !== id);
     this.saveGoals();
   },
+  setSpilloverEnabled(v) { this.spilloverEnabled = !!v; localStorage.setItem(STORE.spilloverEnabled, v ? '1' : '0'); },
   setRoundSetAside(v) { this.roundSetAside = !!v; localStorage.setItem(STORE.roundSetAside, v ? '1' : '0'); },
   setOptimizeShapeAllowed(shape, allowed) {
     if (!shape) return;
@@ -2003,6 +2044,7 @@ const Sync = {
       yearViewEnabled: State.yearViewEnabled,
       leftoverViewEnabled: State.leftoverViewEnabled,
       goals: State.goals,
+      spilloverEnabled: State.spilloverEnabled,
       roundSetAside: State.roundSetAside,
       optimizeShapes: [...State.optimizeShapes],
       flexOverrides: State.flexOverrides,
@@ -2043,6 +2085,7 @@ const Sync = {
     if (typeof p.yearViewEnabled === 'boolean') { State.setYearViewEnabled(p.yearViewEnabled); }
     if (typeof p.leftoverViewEnabled === 'boolean') { State.setLeftoverViewEnabled(p.leftoverViewEnabled); }
     if (Array.isArray(p.goals)) { State.goals = p.goals; State.saveGoals(); }
+    if (typeof p.spilloverEnabled === 'boolean') { State.setSpilloverEnabled(p.spilloverEnabled); }
     if (typeof p.roundSetAside === 'boolean') { State.setRoundSetAside(p.roundSetAside); }
     if (Array.isArray(p.optimizeShapes)) {
       State.optimizeShapes = new Set(p.optimizeShapes);
@@ -2668,7 +2711,10 @@ route('dashboard', (root) => {
                 }
                 const byCat = {};
                 for (const it of billsToRender) (byCat[it.category] ||= []).push(it);
-                const catNames = State.orderedCategories().filter((c) => byCat[c]);
+                const known = State.orderedCategories().filter((c) => byCat[c]);
+                const knownSet = new Set(known);
+                const catNames = known.slice();
+                for (const c of Object.keys(byCat)) if (!knownSet.has(c)) catNames.push(c);
                 const rowsHtml = catNames.map((cat) => {
                   const items = byCat[cat];
                   const orderIdx = new Map(State.orderedBillsInCategory(cat).map((b, i) => [b.id, i]));
@@ -3872,6 +3918,10 @@ route('settings', (root) => {
           <input id="leftover-view-enable" type="checkbox" ${State.leftoverViewEnabled ? 'checked' : ''} style="width:auto;" />
           <label for="leftover-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show Monthly leftover section on Dashboard</label>
         </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="spillover-enable" type="checkbox" ${State.spilloverEnabled ? 'checked' : ''} style="width:auto;" />
+          <label for="spillover-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Cap set-aside at income; roll excess to next pay</label>
+        </div>
       </div>
       <div class="card">
         <h2>Sinking-fund goals</h2>
@@ -4091,7 +4141,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v82 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v83 · ledger edition</p>
       </div>
     </div>
 
@@ -4304,6 +4354,8 @@ route('settings', (root) => {
   if (yearViewEl) yearViewEl.onchange = (e) => { State.setYearViewEnabled(e.target.checked); };
   const leftoverViewEl = $('#leftover-view-enable');
   if (leftoverViewEl) leftoverViewEl.onchange = (e) => { State.setLeftoverViewEnabled(e.target.checked); };
+  const spilloverEl = $('#spillover-enable');
+  if (spilloverEl) spilloverEl.onchange = (e) => { State.setSpilloverEnabled(e.target.checked); };
   const renavKeepScroll = () => {
     const y = window.scrollY;
     navigate();
@@ -4461,7 +4513,7 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 State.load();
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled','saveGoals','addGoal','updateGoal','removeGoal'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled','saveGoals','addGoal','updateGoal','removeGoal','setSpilloverEnabled'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
