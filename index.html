@@ -2513,13 +2513,13 @@ route('dashboard', (root) => {
     <div class="summary summary-top">
       <div class="card">
         <div class="label">Total monthly</div>
-        <div class="value">${fmtUSD.format(monthlyTotal)}</div>
-        <div class="hint">${activeBillsForMonthly.length} bill${activeBillsForMonthly.length === 1 ? '' : 's'}</div>
+        <div class="value neutral">${fmtUSD.format(monthlyTotal)}</div>
+        <div class="hint">${activeBillsForMonthly.length} active bill${activeBillsForMonthly.length === 1 ? '' : 's'} · obligation</div>
       </div>
       <div class="card">
         <div class="label">Avg per paycheck</div>
-        <div class="value">${fmtUSD.format(avg)}</div>
-        <div class="hint">over next ${avgWindow.length} pays</div>
+        <div class="value amber">${fmtUSD.format(avg)}</div>
+        <div class="hint">set aside · next ${avgWindow.length} pays</div>
       </div>
     </div>
 
@@ -4222,7 +4222,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v100 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v101 · ledger edition</p>
       </div>
     </div>
 
