@@ -3846,7 +3846,9 @@ route('schedule', (root) => {
 });
 
 route('settings', (root) => {
-  const activeTab = sessionStorage.getItem('settings.tab') || 'general';
+  let activeTab = sessionStorage.getItem('settings.tab') || 'setup';
+  // Migrate old 'general' tab id to 'setup'
+  if (activeTab === 'general') activeTab = 'setup';
   root.innerHTML = `
     <div class="view-header">
       <div>
@@ -3856,7 +3858,8 @@ route('settings', (root) => {
     </div>
     <div class="settings-tabs">
       ${[
-        ['general', 'General'],
+        ['setup',   'Setup'],
+        ['views',   'Views'],
         ['rules',   'Rules'],
         ['sync',    'Sync'],
         ['data',    'Data'],
@@ -3864,7 +3867,7 @@ route('settings', (root) => {
       ].map(([k, l]) => `<button class="tab-btn${k === activeTab ? ' active' : ''}" data-tab="${k}">${l}</button>`).join('')}
     </div>
 
-    <div class="settings-section${activeTab === 'general' ? ' active' : ''} grid grid-2" data-tab="general">
+    <div class="settings-section${activeTab === 'setup' ? ' active' : ''} grid grid-2" data-tab="setup">
       <div class="card">
         <h2>Income sources</h2>
         <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">Add each paycheck: yours, a spouse's, side gigs. Dashboard totals across them all.</div>
@@ -3917,8 +3920,30 @@ route('settings', (root) => {
           <button class="btn" id="add-income">+ Add income source</button>
         </div>
       </div>
+    </div>
+
+    <div class="settings-section${activeTab === 'views' ? ' active' : ''} grid grid-2" data-tab="views">
       <div class="card">
-        <h2>Views</h2>
+        <h2>Dashboard sections</h2>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <input id="year-view-enable" type="checkbox" ${State.yearViewEnabled ? 'checked' : ''} style="width:auto;" />
+          <label for="year-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show 12-month year view</label>
+        </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="leftover-view-enable" type="checkbox" ${State.leftoverViewEnabled ? 'checked' : ''} style="width:auto;" />
+          <label for="leftover-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show Monthly leftover section</label>
+        </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="show-zero" type="checkbox" ${State.showZeroBills ? 'checked' : ''} style="width:auto;" />
+          <label for="show-zero" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show $0 bills on dashboard (grayed)</label>
+        </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="round-set-aside" type="checkbox" ${State.roundSetAside ? 'checked' : ''} style="width:auto;" />
+          <label for="round-set-aside" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Round set-aside amounts to the nearest $1</label>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Window sizes</h2>
         <label>Schedule view (pay periods)</label>
         <select id="sched-count">
           ${[6,12,18,26].map((n) => `<option value="${n}" ${n===State.schedCount?'selected':''}>${n}</option>`).join('')}
@@ -3929,15 +3954,33 @@ route('settings', (root) => {
             ${[6,12].map((n) => `<option value="${n}" ${n===State.leftoverMonths?'selected':''}>${n}</option>`).join('')}
           </select>
         </div>
-        <div style="margin-top:14px; display:flex; align-items:center; gap:10px;">
-          <input id="year-view-enable" type="checkbox" ${State.yearViewEnabled ? 'checked' : ''} style="width:auto;" />
-          <label for="year-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show 12-month year view on Dashboard</label>
-        </div>
-        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
-          <input id="leftover-view-enable" type="checkbox" ${State.leftoverViewEnabled ? 'checked' : ''} style="width:auto;" />
-          <label for="leftover-view-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show Monthly leftover section on Dashboard</label>
-        </div>
       </div>
+      <div class="card">
+        <h2>Appearance</h2>
+        <label>Theme</label>
+        <select id="theme">
+          ${['auto','light','dark'].map((t) => `<option value="${t}" ${t===State.theme?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      ${(() => {
+        const cats = State.orderedCategories();
+        if (!cats.length) return '';
+        return `<div class="card">
+          <h2>Inline-edit categories</h2>
+          <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:8px;">Enabled categories get an editable Allocate input on each Dashboard breakdown row for the next pay.</div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            ${cats.map((cat) => `
+              <label style="display:flex; align-items:center; gap:8px; margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink); cursor:pointer;">
+                <input type="checkbox" class="inline-edit-cat" data-cat="${escapeAttr(cat)}" ${State.isInlineEditCat(cat) ? 'checked' : ''} style="width:auto;" />
+                <span>${escapeHtml(cat)}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>`;
+      })()}
+    </div>
+
+    <div class="settings-section${activeTab === 'rules' ? ' active' : ''} grid grid-2" data-tab="rules">
       <div class="card">
         <h2>Sinking fund</h2>
         <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">Set aside for one savings goal — either a target amount by a given date, or a % of each pay's leftover.</div>
@@ -4009,40 +4052,7 @@ route('settings', (root) => {
               </div>` : ''}
           </div>`;
         })()}
-        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
-          <input id="round-set-aside" type="checkbox" ${State.roundSetAside ? 'checked' : ''} style="width:auto;" />
-          <label for="round-set-aside" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Round set-aside amounts to the nearest $1</label>
-        </div>
-        ${(() => {
-          const cats = State.orderedCategories();
-          if (!cats.length) return '';
-          return `<div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--hairline);">
-            <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:8px;">Inline-edit Allocate on Dashboard for these categories:</div>
-            <div style="display:flex; flex-direction:column; gap:6px;">
-              ${cats.map((cat) => `
-                <label style="display:flex; align-items:center; gap:8px; margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink); cursor:pointer;">
-                  <input type="checkbox" class="inline-edit-cat" data-cat="${escapeAttr(cat)}" ${State.isInlineEditCat(cat) ? 'checked' : ''} style="width:auto;" />
-                  <span>${escapeHtml(cat)}</span>
-                </label>
-              `).join('')}
-            </div>
-          </div>`;
-        })()}
       </div>
-      <div class="card">
-        <h2>Appearance</h2>
-        <label>Theme</label>
-        <select id="theme">
-          ${['auto','light','dark'].map((t) => `<option value="${t}" ${t===State.theme?'selected':''}>${t}</option>`).join('')}
-        </select>
-        <div style="margin-top:14px; display:flex; align-items:center; gap:10px;">
-          <input id="show-zero" type="checkbox" ${State.showZeroBills ? 'checked' : ''} style="width:auto;" />
-          <label for="show-zero" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Show $0 bills on dashboard (grayed)</label>
-        </div>
-      </div>
-    </div>
-
-    <div class="settings-section${activeTab === 'rules' ? ' active' : ''} grid grid-2" data-tab="rules">
       <div class="card">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
           <h2 style="margin:0;">Payment shape</h2>
@@ -4183,7 +4193,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v97 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v98 · ledger edition</p>
       </div>
     </div>
 
