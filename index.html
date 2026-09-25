@@ -3997,11 +3997,30 @@ route('settings', (root) => {
           const sf = State.sinkingFund || {};
           const pct = Number(sf.targetAmount) > 0 ? Math.min(100, Math.round((Number(sf.savedSoFar || 0) / Number(sf.targetAmount)) * 100)) : 0;
           const remaining = Math.max(0, Number(sf.targetAmount || 0) - Number(sf.savedSoFar || 0));
+          const readyTarget = Number(sf.targetAmount) > 0 && !!sf.targetDate;
+          const readyLeftover = Number(sf.percentOfLeftover) > 0;
+          const readyForMode = sf.mode === 'leftover' ? readyLeftover : readyTarget;
+          const statusColor = sf.enabled ? '#8B5CF6' : 'var(--ink-muted)';
+          const statusText = sf.enabled
+            ? (sf.mode === 'leftover'
+                ? `Active — funneling ${Number(sf.percentOfLeftover) || 0}% of each pay's leftover to "${sf.name || 'Sinking Fund'}"`
+                : (readyTarget
+                    ? `Active — funding ${fmtUSD.format(Number(sf.targetAmount))} by ${sf.targetDate}`
+                    : 'Active — but target amount / date not set'))
+            : (readyForMode
+                ? 'Ready — check "Enable" to start allocating'
+                : (sf.mode === 'leftover' ? 'Set a % of leftover to activate' : 'Set a target amount and date to activate'));
+          const modeHint = sf.mode === 'leftover'
+            ? 'Uses: % of leftover per pay · optional start date · saved so far'
+            : 'Uses: target amount · target date · optional start date · saved so far';
           return `
           <div class="sink-form" style="border:1px solid var(--hairline); border-radius:10px; padding:10px;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
-              <input id="sink-enable" type="checkbox" ${sf.enabled ? 'checked' : ''} style="width:auto;" />
-              <label for="sink-enable" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Enable sinking fund</label>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:6px; flex-wrap:wrap;">
+              <label style="display:flex; align-items:center; gap:10px; margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink); cursor:pointer;">
+                <input id="sink-enable" type="checkbox" ${sf.enabled ? 'checked' : ''} style="width:auto;" />
+                <b style="font-weight:600;">Enable sinking fund</b>
+              </label>
+              <span style="font-size:11px; color:${statusColor};">● ${statusText}</span>
             </div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
               <div style="grid-column: span 2;">
@@ -4018,6 +4037,7 @@ route('settings', (root) => {
                   <option value="target" ${sf.mode === 'target' ? 'selected' : ''}>Target amount by date</option>
                   <option value="leftover" ${sf.mode === 'leftover' ? 'selected' : ''}>% of each pay's leftover</option>
                 </select>
+                <div class="hint" style="font-size:10px; color:var(--ink-muted); margin-top:4px;">${modeHint}</div>
               </div>
               ${sf.mode === 'leftover' ? `
                 <div style="grid-column: span 2;">
@@ -4202,7 +4222,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v99 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v100 · ledger edition</p>
       </div>
     </div>
 
@@ -4455,7 +4475,17 @@ route('settings', (root) => {
       let val = inp.value;
       if (field === 'targetAmount' || field === 'savedSoFar') val = parseFloat(val) || 0;
       if (field === 'percentOfLeftover') val = Math.max(0, Math.min(100, parseFloat(val) || 0));
-      State.updateSinkingFund({ [field]: val });
+      const patch = { [field]: val };
+      // Auto-enable the fund once the fields required by its mode are set,
+      // so users don't fill everything in and see nothing happen.
+      const sf = { ...State.sinkingFund, ...patch };
+      if (!sf.enabled) {
+        const ready = sf.mode === 'leftover'
+          ? Number(sf.percentOfLeftover) > 0
+          : (Number(sf.targetAmount) > 0 && !!sf.targetDate);
+        if (ready) patch.enabled = true;
+      }
+      State.updateSinkingFund(patch);
       renavKeepScroll();
     };
   });
