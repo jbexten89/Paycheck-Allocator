@@ -2488,6 +2488,15 @@ route('dashboard', (root) => {
                 <div style="position:relative; height:16px; margin-top:2px;">
                   <svg width="100%" height="100%" style="display:block; overflow:visible;">${labels}</svg>
                 </div>
+                <div class="chart-legend" style="display:flex; flex-wrap:wrap; gap:10px 14px; margin-top:8px; font-size:10px; color:var(--ink-muted); line-height:1.3;">
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:10px; height:10px; background:var(--amber); border-radius:1px;"></span>set aside</span>
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:10px; height:10px; background:var(--good); border-radius:1px;"></span>selected</span>
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:10px; height:10px; background:var(--danger); border-radius:1px;"></span>over income</span>
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><svg width="14" height="4" style="display:inline-block; vertical-align:middle;"><line x1="0" y1="2" x2="14" y2="2" stroke="var(--ink-muted)" stroke-dasharray="2,2" stroke-width="1"/></svg>income cap</span>
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><svg width="14" height="4" style="display:inline-block; vertical-align:middle;"><line x1="0" y1="2" x2="14" y2="2" stroke="var(--amber)" stroke-dasharray="4,3" stroke-width="1.25"/></svg>average</span>
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><span style="color:var(--danger);">▲</span>peak</span>
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><span style="color:var(--good);">▼</span>low</span>
+                </div>
                 ${(() => {
                   const overCount = avgWindow.filter((p) => { const inc = payAmountAt(p.payDate); return inc > 0 && p.total > inc; }).length;
                   return overCount > 0
@@ -4193,7 +4202,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v98 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v99 · ledger edition</p>
       </div>
     </div>
 
