@@ -30,8 +30,8 @@
     --ink-muted: #6B7480;
     --hairline: #E5E8EE;
     --hairline-strong: #D2D7E0;
-    --amber: #3B82F6;        /* "amber" var name retained — now the blue accent */
-    --amber-soft: #60A5FA;
+    --accent: #3B82F6;        /* primary blue accent — set-aside, buttons, focus */
+    --accent-soft: #60A5FA;
     --good: #16A34A;
     --danger: #EF4444;
     --shadow: 0 1px 2px rgba(15,20,25,0.04), 0 8px 24px rgba(15,20,25,0.06);
@@ -50,8 +50,8 @@
     --ink-muted: #8A93A2;
     --hairline: #232934;
     --hairline-strong: #2F3743;
-    --amber: #3B82F6;        /* primary blue accent */
-    --amber-soft: #60A5FA;
+    --accent: #3B82F6;        /* primary blue accent */
+    --accent-soft: #60A5FA;
     --good: #22C55E;         /* money green */
     --danger: #F87171;
     --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.5);
@@ -65,8 +65,8 @@
       --ink-muted: #8A93A2;
       --hairline: #232934;
       --hairline-strong: #2F3743;
-      --amber: #3B82F6;
-      --amber-soft: #60A5FA;
+      --accent: #3B82F6;
+      --accent-soft: #60A5FA;
       --good: #22C55E;
       --danger: #F87171;
       --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.5);
@@ -90,7 +90,7 @@
   h1 { font-size: 24px; margin: 0 0 4px; }
   h2 { font-size: 16px; margin: 0 0 14px; font-weight: 600; }
   h2.accent {
-    color: var(--amber);
+    color: var(--accent);
     text-transform: uppercase;
     font-size: 12px;
     letter-spacing: 0.1em;
@@ -100,13 +100,13 @@
     margin-bottom: 12px;
   }
   h3 { font-size: 15px; margin: 0 0 8px; }
-  a { color: var(--amber); text-decoration: none; }
+  a { color: var(--accent); text-decoration: none; }
   button { font-family: var(--sans); cursor: pointer; }
   input, select, textarea { font-family: var(--sans); color: var(--ink); }
   input[type="checkbox"] {
     width: 22px !important;
     height: 22px !important;
-    accent-color: var(--amber);
+    accent-color: var(--accent);
     cursor: pointer;
     flex-shrink: 0;
     margin: 0;
@@ -145,7 +145,7 @@
     caret-color: var(--ink) !important;
     transition: background-color 9999s ease-in-out 0s;
   }
-  input:focus, select:focus { outline: 2px solid var(--amber); outline-offset: 1px; border-color: var(--amber); }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
   label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); margin-bottom: 5px; font-weight: 500; }
 
   /* Layout */
@@ -172,7 +172,7 @@
     font-size: 14px; font-weight: 500;
   }
   .nav a:hover { background: var(--paper-2); color: var(--ink); }
-  .nav a.active { background: var(--paper-2); color: var(--amber); }
+  .nav a.active { background: var(--paper-2); color: var(--accent); }
   .nav .ico { font-family: var(--sans); font-style: normal; color: currentColor; width: 16px; text-align: center; opacity: 0.85; }
 
   main {
@@ -213,7 +213,7 @@
     white-space: nowrap;
   }
   .tab-btn:hover { color: var(--ink); }
-  .tab-btn.active { color: var(--amber); border-bottom-color: var(--amber); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
   .settings-section { display: none !important; }
   .settings-section.active { display: grid !important; }
   .view-header .sub { color: var(--ink-muted); font-size: 13px; }
@@ -332,10 +332,10 @@
       pointer-events: none;
     }
   }
-  .summary .label { font-size: 12px; color: var(--amber); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+  .summary .label { font-size: 12px; color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
   .summary .value { font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 700; color: var(--good); margin-top: 4px; letter-spacing: -0.01em; line-height: 1.2; }
   .summary .value.neutral { color: var(--ink); }
-  .summary .value.amber { color: var(--amber); }
+  .summary .value.accent { color: var(--accent); }
   .summary .hint { font-size: 11px; color: var(--ink-muted); margin-top: 10px; line-height: 1.25; }
   .setaside-bar {
     margin-top: 8px;
@@ -346,7 +346,7 @@
   }
   .setaside-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--amber-soft), var(--amber));
+    background: linear-gradient(90deg, var(--accent-soft), var(--accent));
     border-radius: 999px;
     transition: width 240ms ease;
   }
@@ -393,7 +393,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     padding: 0; cursor: pointer; flex-shrink: 0;
   }
-  .pay-arrow:hover:not([disabled]) { border-color: var(--amber); color: var(--amber); }
+  .pay-arrow:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
   .pay-arrow[disabled] { opacity: 0.3; cursor: not-allowed; }
   .today-chip { padding: 6px 14px !important; font-size: 14px !important; height: 32px; }
   @media (max-width: 768px) {
@@ -414,9 +414,9 @@
     line-height: 1;
   }
   label.btn { cursor: pointer; }
-  .btn:hover { border-color: var(--amber); color: var(--amber); }
-  .btn-primary { background: var(--amber); color: #fff; border-color: var(--amber); }
-  .btn-primary:hover { background: var(--amber-soft); border-color: var(--amber-soft); color: #fff; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent-soft); border-color: var(--accent-soft); color: #fff; }
   .btn-danger { color: var(--danger); border-color: var(--hairline-strong); }
   .btn-danger:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
   .btn-ghost { background: transparent; border-color: transparent; }
@@ -440,22 +440,22 @@
   .bill-row { touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   .cat-header { touch-action: pan-y; }
   .drag-handle { touch-action: none; cursor: grab; color: var(--ink-muted); opacity: 0.5; letter-spacing: -3px; padding: 4px 6px; user-select: none; }
-  .drag-handle:hover { opacity: 1; color: var(--amber); }
+  .drag-handle:hover { opacity: 1; color: var(--accent); }
   body.drag-lock { touch-action: none !important; overflow: hidden !important; }
   body.drag-lock * { touch-action: none !important; }
   .bill-row.reorder-source { opacity: 0.3; }
   .bill-row.bill-archived .bill-name,
   .bill-row.bill-archived .bill-amount { opacity: 0.5; text-decoration: line-through; }
-  .bill-row.drag-over-top { box-shadow: inset 0 2px 0 var(--amber); }
-  .bill-row.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--amber); }
+  .bill-row.drag-over-top { box-shadow: inset 0 2px 0 var(--accent); }
+  .bill-row.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--accent); }
   .reorder-ghost { border-radius: var(--radius-lg); overflow: hidden; }
   .bill-list { border: 1px solid var(--hairline); border-radius: var(--radius-lg); overflow: hidden; background: var(--paper-2); }
-  .bill-color { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+  .bill-color { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
   .bill-name { font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--ink); line-height: 1.2; display: inline; }
   .bill-meta { font-size: 11px; color: var(--ink-muted); margin-left: 8px; line-height: 1.2; display: inline; }
   .bill-amount { font-family: var(--sans); font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--good); }
   .badge { display: inline-block; padding: 0 6px; border-radius: 99px; font-size: 10px; background: var(--paper); border: 1px solid var(--hairline); color: var(--ink-muted); margin-left: 6px; }
-  .due-soon-badge { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.55); color: var(--amber); font-weight: 600; }
+  .due-soon-badge { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.55); color: var(--accent); font-weight: 600; }
   .bills-total-bar {
     position: sticky; top: 0; z-index: 30;
     background: var(--paper-2); border: 1px solid var(--hairline); border-radius: 10px;
@@ -485,7 +485,7 @@
   .ym-label { font-size: 12px; font-weight: 600; color: var(--ink); }
   .ym-year { font-size: 10px; color: var(--ink-muted); font-weight: 400; }
   .ym-bar { position: relative; height: 8px; border-radius: 4px; background: var(--paper); overflow: hidden; }
-  .ym-fill { height: 100%; background: var(--amber); border-radius: 4px 0 0 4px; }
+  .ym-fill { height: 100%; background: var(--accent); border-radius: 4px 0 0 4px; }
   .tone-ok .ym-fill { background: var(--good); }
   .tone-short .ym-fill { background: var(--danger); }
   .ym-over { position: absolute; right: 0; top: 0; height: 100%; background: var(--danger); border-radius: 0 4px 4px 0; opacity: 0.85; }
@@ -497,8 +497,8 @@
   .year-total { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline); font-size: 13px; font-weight: 600; color: var(--good); }
   .year-total.short { color: var(--danger); }
   .year-total-meta { display: block; font-size: 11px; color: var(--ink-muted); font-weight: 400; margin-top: 2px; }
-  .bill-row.due-soon { background: linear-gradient(90deg, rgba(245, 158, 11, 0.10), rgba(245, 158, 11, 0.02) 60%, transparent); box-shadow: inset 3px 0 0 var(--amber); }
-  tr.due-soon > td { background: rgba(245, 158, 11, 0.09); box-shadow: inset 3px 0 0 var(--amber); }
+  .bill-row.due-soon { background: linear-gradient(90deg, rgba(245, 158, 11, 0.10), rgba(245, 158, 11, 0.02) 60%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
+  tr.due-soon > td { background: rgba(245, 158, 11, 0.09); box-shadow: inset 3px 0 0 var(--accent); }
   .delete-btn { padding: 2px 8px !important; font-size: 12px !important; }
   .cat-group { margin-bottom: 18px; }
   .cat-group:last-child { margin-bottom: 0; }
@@ -543,12 +543,12 @@
   .cat-header { touch-action: pan-y; }
   .cat-header:hover { border-color: var(--hairline-strong); }
   .cat-header.reorder-source { opacity: 0.3; }
-  .cat-header.drag-over-top { box-shadow: inset 0 3px 0 var(--amber); }
-  .cat-header.drag-over-bottom { box-shadow: inset 0 -3px 0 var(--amber); }
+  .cat-header.drag-over-top { box-shadow: inset 0 3px 0 var(--accent); }
+  .cat-header.drag-over-bottom { box-shadow: inset 0 -3px 0 var(--accent); }
   .cat-name {
     font-family: var(--sans); font-size: 11px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--amber);
+    color: var(--accent);
   }
   .cat-meta {
     font-family: var(--sans); font-size: 11px;
@@ -563,7 +563,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     padding: 0; cursor: pointer; transition: all 120ms;
   }
-  .cat-move:hover:not([disabled]) { color: var(--amber); border-color: var(--amber); }
+  .cat-move:hover:not([disabled]) { color: var(--accent); border-color: var(--accent); }
   .cat-move[disabled] { opacity: 0.3; cursor: not-allowed; }
   .bill-move-group { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 120ms; }
   .bill-row:hover .bill-move-group,
@@ -575,7 +575,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     padding: 0; cursor: pointer; transition: all 120ms;
   }
-  .bill-move:hover:not([disabled]) { color: var(--amber); border-color: var(--amber); }
+  .bill-move:hover:not([disabled]) { color: var(--accent); border-color: var(--accent); }
   .bill-move[disabled] { opacity: 0.3; cursor: not-allowed; }
   @media (max-width: 768px) {
     .bill-move-group { opacity: 1; }
@@ -622,7 +622,7 @@
   .sched-dot { display: inline-block; width: 6px; height: 6px; margin-right: 8px; vertical-align: middle; }
   .schedule-wrap table.schedule td.cyc-0 { background: rgba(59,130,246,0.04); }
   .schedule-wrap table.schedule td.cyc-1 { background: rgba(59,130,246,0.20); }
-  .schedule-wrap table.schedule td.cyc-start { border-left: 2px solid var(--amber); }
+  .schedule-wrap table.schedule td.cyc-start { border-left: 2px solid var(--accent); }
   tr.sched-cat-header td {
     background: var(--paper);
     padding: 6px 0 !important;
@@ -641,7 +641,7 @@
   tr.sched-cat-header .cat-name {
     font-family: var(--sans); font-size: 11px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--amber); margin-right: 12px;
+    color: var(--accent); margin-right: 12px;
   }
   tr.sched-cat-header .cat-meta {
     font-family: var(--sans); font-size: 11px; color: var(--ink-muted);
@@ -659,7 +659,7 @@
   /* Segmented */
   .segmented { display: inline-flex; border: 1px solid var(--hairline-strong); border-radius: 999px; overflow: hidden; background: var(--paper-2); padding: 3px; gap: 2px; }
   .segmented button { background: transparent; border: none; padding: 6px 14px; font-size: 13px; color: var(--ink-soft); border-radius: 999px; font-weight: 500; }
-  .segmented button.active { background: var(--amber); color: #fff; }
+  .segmented button.active { background: var(--accent); color: #fff; }
 
   /* FAB */
   .fab {
@@ -667,12 +667,12 @@
     bottom: calc(24px + env(safe-area-inset-bottom, 0px));
     width: 56px; height: 56px;
     border-radius: 50%;
-    background: var(--amber); color: #fff;
+    background: var(--accent); color: #fff;
     border: none; font-size: 28px; font-weight: 300;
     box-shadow: 0 8px 24px rgba(59,130,246,0.4);
     z-index: 50;
   }
-  .fab:hover { background: var(--amber-soft); }
+  .fab:hover { background: var(--accent-soft); }
   @media (max-width: 768px) {
     .fab {
       right: 16px;
@@ -751,7 +751,7 @@
       color: var(--ink-muted); font-size: 11px;
       letter-spacing: 0.02em; font-weight: 500;
     }
-    .tabbar a.active { color: var(--amber); }
+    .tabbar a.active { color: var(--accent); }
     .tabbar a .ico { display: block; font-family: var(--sans); font-style: normal; font-size: 16px; margin-bottom: 2px; }
     h1 { font-size: 26px; }
     .grid-4 { grid-template-columns: 1fr 1fr; }
@@ -2437,11 +2437,12 @@ route('dashboard', (root) => {
               const isValley = showPeakValley && i === valleyIdx;
               const barX = i*w + w*0.14;
               const barW = w*0.72;
-              const fill = over ? 'var(--danger)' : (sel ? 'var(--good)' : 'var(--amber)');
+              const fill = over ? 'var(--danger)' : 'var(--accent)';
               const stroke = sel ? 'var(--ink)' : 'none';
+              const strokeW = sel ? 2 : 1.5;
               const tag = isPeak ? ' · PEAK' : isValley ? ' · LOW' : '';
               const overTag = over ? ` · OVER by ${fmtUSD.format(p.total - inc)}` : '';
-              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="1.5" rx="1"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: set aside ${fmtUSD.format(p.total)} / income ${fmtUSD.format(inc)}${tag}${overTag}</title></rect>`;
+              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="${strokeW}" rx="1"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: set aside ${fmtUSD.format(p.total)} / income ${fmtUSD.format(inc)}${tag}${overTag}</title></rect>`;
             }).join('');
             // Peak / valley markers — small triangle above the bar top
             const marker = (i, dir) => {
@@ -2471,7 +2472,7 @@ route('dashboard', (root) => {
             }).join('');
             // Average set-aside line across the window (dashed, no label)
             const avgLine = (avg > 0 && avg <= maxVal)
-              ? `<line x1="0" x2="100%" y1="${((1 - avg / maxVal) * 100).toFixed(3)}%" y2="${((1 - avg / maxVal) * 100).toFixed(3)}%" stroke="var(--amber)" stroke-width="1.25" stroke-dasharray="4,3" opacity="0.85"/>`
+              ? `<line x1="0" x2="100%" y1="${((1 - avg / maxVal) * 100).toFixed(3)}%" y2="${((1 - avg / maxVal) * 100).toFixed(3)}%" stroke="var(--accent)" stroke-width="1.25" stroke-dasharray="4,3" opacity="0.85"/>`
               : '';
             const step = avgWindow.length > 20 ? 4 : (avgWindow.length > 10 ? 2 : 1);
             const labels = avgWindow.map((p, i) => {
@@ -2489,11 +2490,11 @@ route('dashboard', (root) => {
                   <svg width="100%" height="100%" style="display:block; overflow:visible;">${labels}</svg>
                 </div>
                 <div class="chart-legend" style="display:flex; flex-wrap:wrap; gap:10px 14px; margin-top:8px; font-size:10px; color:var(--ink-muted); line-height:1.3;">
-                  <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:10px; height:10px; background:var(--amber); border-radius:1px;"></span>set aside</span>
-                  <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:10px; height:10px; background:var(--good); border-radius:1px;"></span>selected</span>
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:10px; height:10px; background:var(--accent); border-radius:1px;"></span>set aside</span>
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:10px; height:10px; background:var(--accent); border:2px solid var(--ink); box-sizing:border-box; border-radius:1px;"></span>selected</span>
                   <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:10px; height:10px; background:var(--danger); border-radius:1px;"></span>over income</span>
                   <span style="display:inline-flex; align-items:center; gap:4px;"><svg width="14" height="4" style="display:inline-block; vertical-align:middle;"><line x1="0" y1="2" x2="14" y2="2" stroke="var(--ink-muted)" stroke-dasharray="2,2" stroke-width="1"/></svg>income cap</span>
-                  <span style="display:inline-flex; align-items:center; gap:4px;"><svg width="14" height="4" style="display:inline-block; vertical-align:middle;"><line x1="0" y1="2" x2="14" y2="2" stroke="var(--amber)" stroke-dasharray="4,3" stroke-width="1.25"/></svg>average</span>
+                  <span style="display:inline-flex; align-items:center; gap:4px;"><svg width="14" height="4" style="display:inline-block; vertical-align:middle;"><line x1="0" y1="2" x2="14" y2="2" stroke="var(--accent)" stroke-dasharray="4,3" stroke-width="1.25"/></svg>average</span>
                   <span style="display:inline-flex; align-items:center; gap:4px;"><span style="color:var(--danger);">▲</span>peak</span>
                   <span style="display:inline-flex; align-items:center; gap:4px;"><span style="color:var(--good);">▼</span>low</span>
                 </div>
@@ -2518,7 +2519,7 @@ route('dashboard', (root) => {
       </div>
       <div class="card">
         <div class="label">Avg per paycheck</div>
-        <div class="value amber">${fmtUSD.format(avg)}</div>
+        <div class="value accent">${fmtUSD.format(avg)}</div>
         <div class="hint">set aside · next ${avgWindow.length} pays</div>
       </div>
     </div>
@@ -2526,7 +2527,7 @@ route('dashboard', (root) => {
     <div class="summary summary-bot">
       <div class="card">
         <div class="label">${offset === 0 ? 'Set aside next pay' : 'Set aside this pay'}</div>
-        <div class="value amber">${fmtUSD.format(next ? next.total : 0)}</div>
+        <div class="value accent">${fmtUSD.format(next ? next.total : 0)}</div>
         ${
           next && payAmountAt(next.payDate) > 0
             ? (() => {
@@ -4222,7 +4223,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v101 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v102 · ledger edition</p>
       </div>
     </div>
 
@@ -4303,18 +4304,18 @@ route('settings', (root) => {
           <li>Drag the ⋮⋮ handle on a row or header to reorder within a category (or reorder categories).</li>
           <li>Tap the ✕ on a category header to delete the category and all its bills.</li>
           <li>Use <strong>Show archived</strong> to see bills you've archived.</li>
-          <li>Bills coming due within your due-soon window get an amber tint + "due in Nd" chip.</li>
+          <li>Bills coming due within your due-soon window get a highlight tint + "due in Nd" chip.</li>
         </ul>
       </div>
       <div class="card">
         <h2>Dashboard</h2>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
           <li>Use ‹ › to walk forward and back through pay periods. <strong>today</strong> returns to the current one.</li>
-          <li>Cash-flow chart: bars are set-aside per pay; per-bar tick marks show that pay's income. Over-income bars cap visually at the income line and go red. A dashed amber line marks the average set-aside; red ▲ marks the peak pay, green ▼ marks the low.</li>
+          <li>Cash-flow chart: bars are set-aside per pay; per-bar tick marks show that pay's income. Over-income bars cap visually at the income line and go red. A dashed line marks the average set-aside; red ▲ marks the peak pay, green ▼ marks the low. The currently-viewed pay is outlined.</li>
           <li><strong>Set aside</strong> card shows leftover vs short for the next pay based on that pay's income.</li>
           <li><strong>Next paycheck breakdown</strong> — bills grouped by category, showing due date, pay-in-cycle (e.g. 1/2), and allocated amount. Goal rows show cumulative / target underneath.</li>
           <li><strong>Monthly leftover</strong> — tap any month row to expand it into per-pay detail rows.</li>
-          <li><strong>Year view</strong> — 12 tiles, one per month, colored by tightness (green / amber / red / muted).</li>
+          <li><strong>Year view</strong> — 12 tiles, one per month, colored by tightness (green / accent / red / muted).</li>
         </ul>
       </div>
       <div class="card">
