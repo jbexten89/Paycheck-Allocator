@@ -2412,6 +2412,24 @@ route('dashboard', (root) => {
       ${WhatIf.active ? '' : `<button class="btn" id="whatif-enter" style="white-space:nowrap;" title="Try changes to bills or income without saving">What if?</button>`}
     </div>
 
+    ${(() => {
+      // Loud empty state: without a positive income amount every per-pay
+      // comparison silently reads $0 (no progress bar, no leftover, no
+      // income ticks on the chart), which looks like a rendering bug.
+      const hasIncome = (State.incomes || []).some((i) => Number(i.amount) > 0)
+        || Number(State.payAmount) > 0;
+      if (hasIncome) return '';
+      return `<div class="card" style="margin-bottom:16px; border-color:var(--danger);">
+        <div class="label" style="color:var(--danger);">No income set up</div>
+        <div class="hint" style="margin-top:6px; font-size:13px; color:var(--ink-soft); line-height:1.5;">
+          Pay dates are showing, but every paycheck amount is $0 — so leftover, the set-aside progress bar, and the chart's income lines can't be calculated.
+        </div>
+        <div style="margin-top:10px;">
+          <a class="btn btn-primary" href="#settings">Add an income source</a>
+        </div>
+      </div>`;
+    })()}
+
     ${
       avgWindow.length > 1
         ? (() => {
@@ -4225,7 +4243,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v106 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v107 · ledger edition</p>
       </div>
     </div>
 
