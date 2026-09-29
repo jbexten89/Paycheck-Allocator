@@ -485,6 +485,9 @@
   .ym-label { font-size: 12px; font-weight: 600; color: var(--ink); }
   .ym-year { font-size: 10px; color: var(--ink-muted); font-weight: 400; }
   .ym-bar { position: relative; height: 8px; border-radius: 4px; background: var(--paper); overflow: hidden; }
+  .bar-hit { cursor: pointer; }
+  .bar-hit:hover { fill: rgba(255,255,255,0.06); }
+  .bar-hit.selected { fill: rgba(255,255,255,0.03); }
   .ym-fill { height: 100%; background: var(--accent); border-radius: 4px 0 0 4px; }
   .tone-ok .ym-fill { background: var(--good); }
   .tone-short .ym-fill { background: var(--danger); }
@@ -2460,7 +2463,20 @@ route('dashboard', (root) => {
               const strokeW = sel ? 2 : 1.5;
               const tag = isPeak ? ' · PEAK' : isValley ? ' · LOW' : '';
               const overTag = over ? ` · OVER by ${fmtUSD.format(p.total - inc)}` : '';
-              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="${strokeW}" rx="1"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: set aside ${fmtUSD.format(p.total)} / income ${fmtUSD.format(inc)}${tag}${overTag}</title></rect>`;
+              return `<rect x="${barX.toFixed(3)}%" y="${(100-h).toFixed(3)}%" width="${barW.toFixed(3)}%" height="${h.toFixed(3)}%" fill="${fill}" stroke="${stroke}" stroke-width="${strokeW}" rx="1"/>`;
+            }).join('');
+            // Transparent full-column hit areas, drawn last so they sit on top.
+            // Gives a generous tap target on touch (taps between bars still land)
+            // and carries the tooltip so hover covers the whole column.
+            const hitAreas = avgWindow.map((p, i) => {
+              const inc = payAmountAt(p.payDate);
+              const over = inc > 0 && p.total > inc;
+              const isPeak = showPeakValley && i === peakIdx;
+              const isValley = showPeakValley && i === valleyIdx;
+              const tag = isPeak ? ' · PEAK' : isValley ? ' · LOW' : '';
+              const overTag = over ? ` · OVER by ${fmtUSD.format(p.total - inc)}` : '';
+              const sel = i === selectedInWindow;
+              return `<rect class="bar-hit${sel ? ' selected' : ''}" data-bar-idx="${i}" x="${(i*w).toFixed(3)}%" y="0" width="${w.toFixed(3)}%" height="100%" fill="transparent"><title>Pay ${i+1} · ${fmtDateShort.format(p.payDate)}: set aside ${fmtUSD.format(p.total)} / income ${fmtUSD.format(inc)}${tag}${overTag}</title></rect>`;
             }).join('');
             // Peak / valley markers — small triangle above the bar top
             const marker = (i, dir) => {
@@ -2502,7 +2518,7 @@ route('dashboard', (root) => {
               <div class="card">
                 <h2 class="accent">Cash-flow forecast · next ${avgWindow.length} pays</h2>
                 <div style="position:relative; height:120px; margin-top:8px;">
-                  <svg width="100%" height="100%" preserveAspectRatio="none" style="display:block; overflow:visible;">${bars}${payLine}${avgLine}${peakValleyMarks}</svg>
+                  <svg width="100%" height="100%" preserveAspectRatio="none" style="display:block; overflow:visible;">${bars}${payLine}${avgLine}${peakValleyMarks}${hitAreas}</svg>
                 </div>
                 <div style="position:relative; height:16px; margin-top:2px;">
                   <svg width="100%" height="100%" style="display:block; overflow:visible;">${labels}</svg>
@@ -2515,6 +2531,7 @@ route('dashboard', (root) => {
                   <span style="display:inline-flex; align-items:center; gap:4px;"><svg width="14" height="4" style="display:inline-block; vertical-align:middle;"><line x1="0" y1="2" x2="14" y2="2" stroke="var(--accent)" stroke-dasharray="4,3" stroke-width="1.25"/></svg>average</span>
                   <span style="display:inline-flex; align-items:center; gap:4px;"><span style="color:var(--danger);">▲</span>peak</span>
                   <span style="display:inline-flex; align-items:center; gap:4px;"><span style="color:var(--good);">▼</span>low</span>
+                  <span style="opacity:0.8;">· tap a bar to view that pay</span>
                 </div>
                 ${(() => {
                   const overCount = avgWindow.filter((p) => { const inc = payAmountAt(p.payDate); return inc > 0 && p.total > inc; }).length;
@@ -2836,6 +2853,15 @@ route('dashboard', (root) => {
   if (back) back.onclick = () => { if (canBack) { offset--; render(); } };
   if (fwd) fwd.onclick = () => { if (canFwd) { offset++; render(); } };
   if (todayBtn) todayBtn.onclick = () => { offset = 0; render(); };
+  // Tap / click a chart column to jump the Set-aside card + breakdown to that pay
+  root.querySelectorAll('.bar-hit').forEach((el) => {
+    el.onclick = () => {
+      const i = parseInt(el.dataset.barIdx, 10);
+      if (!isFinite(i)) return;
+      offset = i;
+      render();
+    };
+  });
   const whatIfBtn = root.querySelector('#whatif-enter');
   if (whatIfBtn) whatIfBtn.onclick = () => {
     if (WhatIf.active) { alert('Already in What-if mode. Use the banner at the top to Keep or Discard.'); return; }
@@ -4243,7 +4269,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v107 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v108 · ledger edition</p>
       </div>
     </div>
 
@@ -4330,7 +4356,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>Dashboard</h2>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
-          <li>Use ‹ › to walk forward and back through pay periods. <strong>today</strong> returns to the current one.</li>
+          <li>Use ‹ › to walk forward and back through pay periods, or <strong>tap a bar</strong> on the cash-flow chart to jump straight to that pay. <strong>today</strong> returns to the current one.</li>
           <li>Cash-flow chart: bars are set-aside per pay; per-bar tick marks show that pay's income. Over-income bars cap visually at the income line and go red. A dashed line marks the average set-aside; red ▲ marks the peak pay, green ▼ marks the low. The currently-viewed pay is outlined.</li>
           <li><strong>Set aside</strong> card shows leftover vs short for the next pay based on that pay's income.</li>
           <li><strong>Next paycheck breakdown</strong> — bills grouped by category, showing due date, pay-in-cycle (e.g. 1/2), and allocated amount. Goal rows show cumulative / target underneath.</li>
