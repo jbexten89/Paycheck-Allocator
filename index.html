@@ -310,6 +310,19 @@
     .summary-top, .summary-bot { flex: 1; margin: 0 !important; }
     .summary-bot { position: static !important; box-shadow: none !important; padding: 0 !important; background: transparent !important; }
   }
+  /* Tablet portrait (769–899px) fell between the mobile and desktop rules, so
+     nothing stuck. Same treatment as mobile, using the 40px desktop gutter. */
+  @media (min-width: 769px) and (max-width: 899px) {
+    .summary-bot {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      padding: 8px 40px;
+      background: var(--paper);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.35);
+      margin: 0 -40px 12px;
+    }
+  }
   @media (max-width: 768px) {
     .summary-bot {
       position: sticky;
@@ -4269,7 +4282,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v108 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v109 · ledger edition</p>
       </div>
     </div>
 
