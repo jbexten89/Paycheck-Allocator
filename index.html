@@ -2830,7 +2830,7 @@ route('dashboard', (root) => {
                     const editable = next && billObj && State.isInlineEditCat(catKey);
                     let allocateCell;
                     if (editable) {
-                      allocateCell = `<td class="total"><input class="flex-amt-input" type="number" step="0.01" min="0" value="${(it.amount || 0).toFixed(2)}" data-bill="${escapeAttr(it.billId)}" data-pay="${toISO(next.payDate)}" /></td>`;
+                      allocateCell = `<td class="total"><input class="flex-amt-input" type="text" inputmode="numeric" autocomplete="off" value="${(it.amount || 0).toFixed(2)}" data-bill="${escapeAttr(it.billId)}" data-pay="${toISO(next.payDate)}" /></td>`;
                     } else if (it.isGoal && typeof it.runningBalance === 'number' && it.goalTarget > 0) {
                       allocateCell = `<td class="total">${fmtUSD.format(it.amount)}<div class="hint" style="font-size:10px; color:var(--ink-muted); font-weight:400; margin-top:2px;">${fmtUSD.format(it.runningBalance)} / ${fmtUSD.format(it.goalTarget)}</div></td>`;
                     } else {
@@ -2898,6 +2898,15 @@ route('dashboard', (root) => {
   });
   root.querySelectorAll('.flex-amt-input').forEach((inp) => {
     selectAllOnFocus(inp);
+    // Implied decimal: digits shift in from the right, last two are always
+    // cents — typing 5000 gives 50.00, backspace shifts back the other way.
+    inp.addEventListener('input', () => {
+      const digits = inp.value.replace(/\D/g, '').slice(0, 11);
+      const cents = digits ? parseInt(digits, 10) : 0;
+      inp.value = (cents / 100).toFixed(2);
+      // Caret stays at the end so the next digit lands in the ones place
+      try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch {}
+    });
     inp.addEventListener('change', () => {
       State.setFlexOverride(inp.dataset.bill, inp.dataset.pay, parseFloat(inp.value));
       try { Sync.push(); } catch {}
@@ -4282,7 +4291,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v109 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v110 · ledger edition</p>
       </div>
     </div>
 
