@@ -2809,7 +2809,7 @@ route('dashboard', (root) => {
                     if (isCell && it.dueDate) {
                       const mKey = it.dueDate.getFullYear() + '-' + String(it.dueDate.getMonth() + 1).padStart(2, '0');
                       const cred = (State.cellCredits || {})[mKey] || '';
-                      cellExtra = ` <input class="cell-credit-input" type="number" step="0.01" min="0" placeholder="credit" value="${cred}" data-mkey="${mKey}" />`;
+                      cellExtra = ` <input class="cell-credit-input" type="text" inputmode="numeric" autocomplete="off" placeholder="credit" value="${cred}" data-mkey="${mKey}" />`;
                     }
                     const billObj = State.bills.find((x) => x.id === it.billId);
                     let dueInfo = null;
@@ -2887,8 +2887,25 @@ route('dashboard', (root) => {
     // iOS Safari can steal the selection after focus; a click also selects.
     inp.addEventListener('click', sel);
   };
+  // Implied decimal: digits shift in from the right, last two are always
+  // cents — typing 5000 gives 50.00, backspace shifts back the other way.
+  // Clearing the field leaves it empty, which callers read as "unset".
+  const attachImpliedDecimal = (inp) => {
+    inp.addEventListener('input', (e) => {
+      const digits = inp.value.replace(/\D/g, '').slice(0, 11);
+      const deleting = typeof e.inputType === 'string' && e.inputType.startsWith('delete');
+      // Empty, or backspaced all the way down to zero -> leave the field blank
+      // so it reads as "unset" rather than a literal 0.00. Typing zeros still
+      // yields 0.00, which is a valid explicit amount.
+      if (!digits || (deleting && parseInt(digits, 10) === 0)) { inp.value = ''; return; }
+      inp.value = (parseInt(digits, 10) / 100).toFixed(2);
+      // Caret stays at the end so the next digit lands in the ones place
+      try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch {}
+    });
+  };
   root.querySelectorAll('.cell-credit-input').forEach((inp) => {
     selectAllOnFocus(inp);
+    attachImpliedDecimal(inp);
     inp.addEventListener('change', () => {
       State.setCellCredit(inp.dataset.mkey, parseFloat(inp.value) || 0);
       const y = window.scrollY;
@@ -2898,15 +2915,7 @@ route('dashboard', (root) => {
   });
   root.querySelectorAll('.flex-amt-input').forEach((inp) => {
     selectAllOnFocus(inp);
-    // Implied decimal: digits shift in from the right, last two are always
-    // cents — typing 5000 gives 50.00, backspace shifts back the other way.
-    inp.addEventListener('input', () => {
-      const digits = inp.value.replace(/\D/g, '').slice(0, 11);
-      const cents = digits ? parseInt(digits, 10) : 0;
-      inp.value = (cents / 100).toFixed(2);
-      // Caret stays at the end so the next digit lands in the ones place
-      try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch {}
-    });
+    attachImpliedDecimal(inp);
     inp.addEventListener('change', () => {
       State.setFlexOverride(inp.dataset.bill, inp.dataset.pay, parseFloat(inp.value));
       try { Sync.push(); } catch {}
@@ -4291,7 +4300,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v110 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v112 · ledger edition</p>
       </div>
     </div>
 
