@@ -2173,7 +2173,13 @@ const Sync = {
     }
     sb.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session) {
+        // supabase-js re-emits SIGNED_IN when it recovers/refreshes the session,
+        // which happens every time the page becomes visible again. Treating that
+        // like a fresh login re-pulls the cloud row and overwrites local edits —
+        // so only sync when the signed-in user actually changed.
+        const resumed = this.user && this.user.id === session.user.id;
         this.user = session.user;
+        if (resumed) { this.setStatus('synced'); return; }
         await this.pullOrPush();
         navigate();
       } else if (event === 'SIGNED_OUT') {
@@ -4320,7 +4326,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v113 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v114 · ledger edition</p>
       </div>
     </div>
 
