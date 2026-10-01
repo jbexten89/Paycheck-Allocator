@@ -874,7 +874,8 @@ const STORE = {
   flexEditEnabled: 'paycheck_allocator.flex_edit_enabled',
   inlineEditCats: 'paycheck_allocator.inline_edit_cats',
   leftoverViewEnabled: 'paycheck_allocator.leftover_view_enabled',
-  sinkingFund: 'paycheck_allocator.sinking_fund'
+  sinkingFund: 'paycheck_allocator.sinking_fund',
+  syncDirty: 'paycheck_allocator.sync_dirty'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -2198,10 +2199,19 @@ const Sync = {
     return data;
   },
   async signOut() { if (ensureSb()) await sb.auth.signOut(); },
+  // "Dirty" = this device has local edits that haven't reached the cloud yet.
+  // Persisted, so it survives the app being closed mid-debounce.
+  isDirty() { return localStorage.getItem(STORE.syncDirty) === '1'; },
+  markDirty() { try { localStorage.setItem(STORE.syncDirty, '1'); } catch {} },
+  clearDirty() { try { localStorage.removeItem(STORE.syncDirty); } catch {} },
+
   async pullOrPush() {
     if (!ensureSb() || !this.user) return;
     this.setStatus('syncing');
     try {
+      // Unpushed local edits must win, or launching the app would silently
+      // overwrite them with the older cloud copy.
+      if (this.isDirty()) { await this._pushNow(); return; }
       const { data, error } = await sb.from('paycheck_data').select('payload,updated_at').maybeSingle();
       if (error) throw error;
       if (data && data.payload && Array.isArray(data.payload.bills) && data.payload.bills.length > 0) {
@@ -2215,9 +2225,18 @@ const Sync = {
   push() {
     if (typeof WhatIf !== 'undefined' && WhatIf.active) return;
     if (!ensureSb() || !this.user) return;
+    this.markDirty();
     if (!navigator.onLine) { this.setStatus('offline'); return; }
     clearTimeout(this.pushTimer);
     this.pushTimer = setTimeout(() => this._pushNow(), 800);
+  },
+  // Send any pending edit immediately — used when the app is being backgrounded
+  // or closed, where the 800ms debounce would otherwise never fire.
+  flush() {
+    if (typeof WhatIf !== 'undefined' && WhatIf.active) return;
+    if (!this.isDirty()) return;
+    clearTimeout(this.pushTimer);
+    this._pushNow();
   },
   async _pushNow() {
     if (!ensureSb() || !this.user) return;
@@ -2229,6 +2248,7 @@ const Sync = {
         updated_at: new Date().toISOString()
       });
       if (error) throw error;
+      this.clearDirty();
       this.setStatus('synced');
     } catch (e) { this.setStatus('error', e.message); }
   }
@@ -4300,7 +4320,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v112 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v113 · ledger edition</p>
       </div>
     </div>
 
@@ -4701,6 +4721,15 @@ State.load();
 });
 Sync.on(() => { const el = document.getElementById('sync-status'); if (el) el.textContent = Sync.status + (Sync.lastError ? ` (${Sync.lastError})` : ''); });
 Sync.init();
+
+// Flush pending edits when the app is backgrounded or closed. On iOS a PWA can
+// be frozen without firing 'beforeunload', so visibilitychange + pagehide are
+// the reliable hooks — without these an edit made in the last 800ms is stranded
+// locally and gets clobbered by the next launch's pull.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { try { Sync.flush(); } catch {} }
+});
+window.addEventListener('pagehide', () => { try { Sync.flush(); } catch {} });
 
 navigate();
 
