@@ -480,6 +480,20 @@
   .bills-total-label { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .bills-total-amount { font-size: 18px; font-weight: 600; color: var(--good); font-variant-numeric: tabular-nums; }
   .bills-total-count { font-size: 12px; color: var(--ink-muted); margin-left: auto; }
+  /* Collapsible dashboard section headers */
+  .dash-sec-head {
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; user-select: none; -webkit-user-select: none;
+    margin: 0; padding: 2px 0;
+  }
+  .dash-sec-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .dash-sec-chevron { font-size: 11px; opacity: 0.75; width: 10px; flex: none; }
+  /* Collapsed card is just its title — drop the heading's content gap.
+     Needs .card.x .y specificity to beat the general `.card h2` margin. */
+  .card.dash-sec-collapsed { padding-top: 12px; padding-bottom: 12px; }
+  .card.dash-sec-collapsed .dash-sec-head {
+    margin-bottom: 0; padding-bottom: 0; border-bottom: none;
+  }
   /* Bills search + filter bar */
   .bills-filter {
     display: grid; grid-template-columns: 1fr auto auto; gap: 8px;
@@ -930,7 +944,8 @@ const STORE = {
   leftoverViewEnabled: 'paycheck_allocator.leftover_view_enabled',
   sinkingFund: 'paycheck_allocator.sinking_fund',
   syncDirty: 'paycheck_allocator.sync_dirty',
-  syncBase: 'paycheck_allocator.sync_base'
+  syncBase: 'paycheck_allocator.sync_base',
+  collapsedSections: 'paycheck_allocator.collapsed_sections'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1620,6 +1635,8 @@ const State = {
     this.payAmount = parseFloat(localStorage.getItem(STORE.payAmount) || '0') || 0;
     try { this.collapsedCats = new Set(JSON.parse(localStorage.getItem(STORE.collapsedCats) || '[]')); }
     catch { this.collapsedCats = new Set(); }
+    try { this.collapsedSections = new Set(JSON.parse(localStorage.getItem(STORE.collapsedSections) || '[]')); }
+    catch { this.collapsedSections = new Set(); }
     this.showZeroBills = localStorage.getItem(STORE.showZeroBills) === '1';
     this.dueSoonEnabled = localStorage.getItem(STORE.dueSoonEnabled) !== '0';
     { const n = parseInt(localStorage.getItem(STORE.dueSoonDays) || '5', 10); this.dueSoonDays = Number.isFinite(n) && n > 0 ? n : 5; }
@@ -1996,6 +2013,17 @@ const State = {
   },
   isCatCollapsed(cat) { return this.collapsedCats.has(cat); },
   persistCollapsed() { localStorage.setItem(STORE.collapsedCats, JSON.stringify([...this.collapsedCats])); },
+  // Dashboard sections collapse per-device and stay local — unlike hiding a
+  // section in Settings, this is a view preference, not a configuration.
+  isSectionCollapsed(key) { return this.collapsedSections.has(key); },
+  toggleSectionCollapsed(key) {
+    if (this.collapsedSections.has(key)) this.collapsedSections.delete(key);
+    else this.collapsedSections.add(key);
+    this.persistSections();
+  },
+  persistSections() {
+    try { localStorage.setItem(STORE.collapsedSections, JSON.stringify([...this.collapsedSections])); } catch {}
+  },
   orderedBillsInCategory(cat) {
     const inCat = this.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat);
     const idx = (id) => {
@@ -2568,6 +2596,29 @@ function promptSyncConflict(theirStamp) {
   });
 }
 
+/* --------------------- Dashboard sections --------------------- */
+// Collapsible section headers. A collapsed section renders only its header —
+// the body's computation is skipped entirely, which matters most for Year
+// view and the breakdown table at high bill counts.
+function dashSectionHead(key, title) {
+  const collapsed = State.isSectionCollapsed(key);
+  return `<h2 class="accent dash-sec-head" data-dash-sec="${escapeAttr(key)}" role="button" tabindex="0" aria-expanded="${collapsed ? 'false' : 'true'}">
+    <span class="dash-sec-chevron">${collapsed ? '▸' : '▾'}</span><span>${title}</span>
+  </h2>`;
+}
+function dashCollapsedCard(key, title) {
+  return `<div style="margin-bottom:16px;"><div class="card dash-sec-collapsed">${dashSectionHead(key, title)}</div></div>`;
+}
+function wireDashSections(root, rerender) {
+  root.querySelectorAll('[data-dash-sec]').forEach((h) => {
+    const toggle = () => { State.toggleSectionCollapsed(h.dataset.dashSec); rerender(); };
+    h.onclick = toggle;
+    h.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    };
+  });
+}
+
 /* ------------------------- Toasts ------------------------- */
 // Transient bottom-center message, optionally with a single action (Undo).
 // Dismissing by timeout or ✕ runs onExpire, which is where a deferred
@@ -2685,7 +2736,9 @@ route('dashboard', (root) => {
 
     ${
       avgWindow.length > 1
-        ? (() => {
+        ? (State.isSectionCollapsed('forecast')
+          ? dashCollapsedCard('forecast', `Cash-flow forecast · next ${avgWindow.length} pays`)
+          : (() => {
             const maxVal = Math.max(...avgWindow.map((p) => Math.max(p.total, payAmountAt(p.payDate))), 1);
             const w = 100 / avgWindow.length;
             const selectedInWindow = targetIdx - nextIdx;
@@ -2766,7 +2819,7 @@ route('dashboard', (root) => {
             }).join('');
             return `<div style="margin-bottom:16px;">
               <div class="card">
-                <h2 class="accent">Cash-flow forecast · next ${avgWindow.length} pays</h2>
+                ${dashSectionHead('forecast', `Cash-flow forecast · next ${avgWindow.length} pays`)}
                 <div style="position:relative; height:120px; margin-top:8px;">
                   <svg width="100%" height="100%" preserveAspectRatio="none" style="display:block; overflow:visible;">${bars}${payLine}${avgLine}${peakValleyMarks}${hitAreas}</svg>
                 </div>
@@ -2791,7 +2844,7 @@ route('dashboard', (root) => {
                 })()}
               </div>
             </div>`;
-          })()
+          })())
         : ''
     }
 
@@ -2856,7 +2909,9 @@ route('dashboard', (root) => {
 
     ${
       (State.leftoverViewEnabled && State.incomes && State.incomes.some((i) => Number(i.amount) > 0))
-        ? (() => {
+        ? (State.isSectionCollapsed('leftover')
+          ? dashCollapsedCard('leftover', `Monthly leftover · next ${State.leftoverMonths} months`)
+          : (() => {
             const monthsToShow = State.leftoverMonths;
             const spanCount = monthsToShow >= 12 ? 52 : 26;
             const byMonth = new Map();
@@ -2880,7 +2935,7 @@ route('dashboard', (root) => {
             const totalShort = totalLeft < 0;
             const totalPays = rows.reduce((s, r) => s + r.pays, 0);
             return `<div style="margin-bottom:16px;"><div class="card">
-              <h2 class="accent">Monthly leftover · next ${rows.length} months</h2>
+              ${dashSectionHead('leftover', `Monthly leftover · next ${rows.length} months`)}
               <table class="schedule leftover-table" style="min-width:0;">
                 <thead><tr><th>Month</th><th>Pays</th><th>Leftover</th></tr></thead>
                 <tbody>
@@ -2898,13 +2953,15 @@ route('dashboard', (root) => {
                 </tbody>
               </table>
             </div></div>`;
-          })()
+          })())
         : ''
     }
 
     ${
       (State.yearViewEnabled && State.incomes && State.incomes.some((i) => Number(i.amount) > 0))
-        ? (() => {
+        ? (State.isSectionCollapsed('yearview')
+          ? dashCollapsedCard('yearview', 'Year view · next 12 months')
+          : (() => {
             // 12-month view of set-aside vs income for each calendar month.
             const today0 = new Date(); today0.setHours(0,0,0,0);
             const startIdx = perPaycheck.findIndex((p) => p.payDate >= today0);
@@ -2934,7 +2991,7 @@ route('dashboard', (root) => {
             const totalSetAside = cells.reduce((s, m) => s + m.setAside, 0);
             const totalDiff = totalIncome - totalSetAside;
             return `<div style="margin-bottom:16px;"><div class="card">
-              <h2 class="accent">Year view · next 12 months</h2>
+              ${dashSectionHead('yearview', 'Year view · next 12 months')}
               <div class="year-grid">
                 ${cells.map((m) => {
                   const hasData = m.pays > 0;
@@ -2959,15 +3016,16 @@ route('dashboard', (root) => {
                 <span class="year-total-meta">(income ${fmtUSD.format(totalIncome)} · set aside ${fmtUSD.format(totalSetAside)})</span>
               </div>
             </div></div>`;
-          })()
+          })())
         : ''
     }
 
     <div>
-      <div class="card">
-        <h2 class="accent">Next paycheck breakdown</h2>
+      <div class="card${State.isSectionCollapsed('breakdown') ? ' dash-sec-collapsed' : ''}">
+        ${dashSectionHead('breakdown', 'Next paycheck breakdown')}
         ${
-          (next && next.items.length) || (State.showZeroBills && State.bills.some((b) => b.amount > 0))
+          State.isSectionCollapsed('breakdown') ? ''
+          : (next && next.items.length) || (State.showZeroBills && State.bills.some((b) => b.amount > 0))
             ? (() => {
                 const catFor = (bill) => (bill.category && bill.category.trim()) || 'Uncategorized';
                 const nextItems = (next && next.items) || [];
@@ -3103,6 +3161,13 @@ route('dashboard', (root) => {
   if (back) back.onclick = () => { if (canBack) { offset--; render(); } };
   if (fwd) fwd.onclick = () => { if (canFwd) { offset++; render(); } };
   if (todayBtn) todayBtn.onclick = () => { offset = 0; render(); };
+  // Collapse / expand a dashboard section (keeps the scroll position; only the
+  // section below the tap changes height).
+  wireDashSections(root, () => {
+    const y = window.scrollY;
+    render();
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  });
   // Tap / click a chart column to jump the Set-aside card + breakdown to that pay
   root.querySelectorAll('.bar-hit').forEach((el) => {
     el.onclick = () => {
@@ -4614,7 +4679,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v115 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v116 · ledger edition</p>
       </div>
     </div>
 
@@ -4707,6 +4772,7 @@ route('settings', (root) => {
           <li>Cash-flow chart: bars are set-aside per pay; per-bar tick marks show that pay's income. Over-income bars cap visually at the income line and go red. A dashed line marks the average set-aside; red ▲ marks the peak pay, green ▼ marks the low. The currently-viewed pay is outlined.</li>
           <li><strong>Set aside</strong> card shows leftover vs short for the next pay based on that pay's income.</li>
           <li><strong>Next paycheck breakdown</strong> — bills grouped by category, showing due date, pay-in-cycle (e.g. 1/2), and allocated amount. Goal rows show cumulative / target underneath.</li>
+          <li>Tap any section heading (▾) to collapse it. A collapsed section isn't just hidden — its contents are skipped entirely, so collapsing Year view and the breakdown measurably speeds up the Dashboard with a lot of bills. The state is remembered per device and isn't synced. To hide a section permanently instead, use the <em>Views</em> tab in Settings.</li>
           <li><strong>Monthly leftover</strong> — tap any month row to expand it into per-pay detail rows.</li>
           <li><strong>Year view</strong> — 12 tiles, one per month, colored by tightness (green / accent / red / muted).</li>
         </ul>
