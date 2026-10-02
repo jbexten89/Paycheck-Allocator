@@ -525,6 +525,15 @@
   .bills-total-label { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .bills-total-amount { font-size: 18px; font-weight: 600; color: var(--good); font-variant-numeric: tabular-nums; }
   .bills-total-count { font-size: 12px; color: var(--ink-muted); margin-left: auto; }
+  /* The low-high pair is one value and must never break across lines. Inline
+     after a separator where there's room; its own line on a phone. */
+  .bills-total-range { white-space: nowrap; }
+  .bills-total-range::before { content: ' · '; }
+  @media (max-width: 768px) {
+    .bills-total-count { text-align: right; }
+    .bills-total-range { display: block; }
+    .bills-total-range::before { content: none; }
+  }
   .badge.badge-var { color: var(--accent); border-color: rgba(59,130,246,0.4); }
   .badge.badge-credit { color: var(--good); border-color: rgba(52,211,153,0.45); }
   .badge.badge-short { color: var(--danger); border-color: rgba(248,113,113,0.45); }
@@ -3844,7 +3853,7 @@ route('bills', (root) => {
       <span class="bills-total-amount">${fmtUSD.format(monthlyTotal)}</span>
       <span class="bills-total-count">${billCount} active bill${billCount === 1 ? '' : 's'}${
         variableBills.length && monthlyHigh > monthlyLow
-          ? ` · ${moneyRange(Math.round(monthlyLow), Math.round(monthlyHigh))}`
+          ? `<span class="bills-total-range">${moneyRange(Math.round(monthlyLow), Math.round(monthlyHigh))}</span>`
           : ''
       }</span>
     </div>
@@ -5065,7 +5074,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v125 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v126 · ledger edition</p>
       </div>
     </div>
 
