@@ -480,6 +480,58 @@
   .bills-total-label { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .bills-total-amount { font-size: 18px; font-weight: 600; color: var(--good); font-variant-numeric: tabular-nums; }
   .bills-total-count { font-size: 12px; color: var(--ink-muted); margin-left: auto; }
+  /* Bills search + filter bar */
+  .bills-filter {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 8px;
+    align-items: center; margin-bottom: 12px;
+  }
+  .bills-filter input[type="search"] { width: 100%; margin: 0; }
+  .bills-filter select { margin: 0; min-width: 0; }
+  .bills-filter-meta {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: var(--ink-muted); min-height: 0;
+  }
+  .bills-filter-meta:empty { display: none; }
+  .bills-filter-meta button {
+    background: none; border: none; padding: 0; cursor: pointer;
+    color: var(--accent); font: inherit; text-decoration: underline;
+  }
+  @media (max-width: 560px) {
+    .bills-filter { grid-template-columns: 1fr 1fr; }
+    .bills-filter input[type="search"] { grid-column: 1 / -1; }
+  }
+  .cat-group.filtered-out, .bill-row.filtered-out { display: none; }
+  /* Undo toast */
+  .toast-wrap {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: 24px;
+    z-index: 200; display: flex; flex-direction: column; gap: 8px;
+    width: min(440px, calc(100vw - 32px)); pointer-events: none;
+  }
+  .toast {
+    pointer-events: auto;
+    display: flex; align-items: center; gap: 14px;
+    background: var(--paper-2); border: 1px solid var(--hairline);
+    border-radius: 10px; padding: 11px 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    font-size: 14px; color: var(--ink);
+    animation: toast-in 160ms ease-out;
+  }
+  .toast.leaving { animation: toast-out 140ms ease-in forwards; }
+  .toast-msg { flex: 1; min-width: 0; }
+  .toast-action {
+    background: none; border: none; padding: 4px 2px; cursor: pointer;
+    color: var(--accent); font: inherit; font-weight: 600; white-space: nowrap;
+  }
+  .toast-close {
+    background: none; border: none; padding: 2px 4px; cursor: pointer;
+    color: var(--ink-muted); font-size: 16px; line-height: 1;
+  }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes toast-out { to { opacity: 0; transform: translateY(6px); } }
+  @media (prefers-reduced-motion: reduce) {
+    .toast, .toast.leaving { animation: none; }
+  }
   /* Dashboard next-paycheck breakdown table — fit narrow phone widths */
   table.schedule.dash-breakdown th, table.schedule.dash-breakdown td { padding-left: 4px; padding-right: 4px; }
   table.schedule.dash-breakdown th:first-child, table.schedule.dash-breakdown td:first-child { padding-left: 8px; white-space: normal; }
@@ -747,6 +799,8 @@
     .app { grid-template-columns: 1fr; }
     .sidebar { display: none; }
     main { padding: calc(20px + env(safe-area-inset-top, 0px)) 16px calc(140px + env(safe-area-inset-bottom, 0px)); }
+    /* Clear the tab bar and the FAB above it, so Undo stays tappable */
+    .toast-wrap { bottom: calc(140px + env(safe-area-inset-bottom, 0px)); }
     .tabbar {
       display: flex;
       position: fixed; bottom: 0; left: 0; right: 0;
@@ -875,7 +929,8 @@ const STORE = {
   inlineEditCats: 'paycheck_allocator.inline_edit_cats',
   leftoverViewEnabled: 'paycheck_allocator.leftover_view_enabled',
   sinkingFund: 'paycheck_allocator.sinking_fund',
-  syncDirty: 'paycheck_allocator.sync_dirty'
+  syncDirty: 'paycheck_allocator.sync_dirty',
+  syncBase: 'paycheck_allocator.sync_base'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1975,6 +2030,27 @@ const State = {
     localStorage.setItem(STORE.catOrder, JSON.stringify(this.catOrder));
     this.persistCollapsed();
   },
+  // Capture everything a bill/category delete can touch, so an undo puts
+  // rows back in their original position rather than appending them.
+  snapshotBills() {
+    return {
+      bills: JSON.parse(JSON.stringify(this.bills || [])),
+      catOrder: (this.catOrder || []).slice(),
+      billOrder: (this.billOrder || []).slice(),
+      collapsedCats: Array.from(this.collapsedCats || [])
+    };
+  },
+  restoreBillsSnapshot(snap) {
+    if (!snap) return;
+    this.bills = JSON.parse(JSON.stringify(snap.bills || []));
+    this.catOrder = (snap.catOrder || []).slice();
+    this.billOrder = (snap.billOrder || []).slice();
+    this.collapsedCats = new Set(snap.collapsedCats || []);
+    this.saveBills();
+    localStorage.setItem(STORE.catOrder, JSON.stringify(this.catOrder));
+    localStorage.setItem(STORE.billOrder, JSON.stringify(this.billOrder));
+    this.persistCollapsed();
+  },
   reorderBillsInCategory(cat, newIdOrder) {
     const inCat = this.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat);
     const catIds = new Set(inCat.map((b) => b.id));
@@ -2211,6 +2287,12 @@ const Sync = {
   markDirty() { try { localStorage.setItem(STORE.syncDirty, '1'); } catch {} },
   clearDirty() { try { localStorage.removeItem(STORE.syncDirty); } catch {} },
 
+  // The updated_at of the cloud row this device's data is derived from.
+  // A push whose base no longer matches the cloud means another device
+  // wrote in between, and blindly upserting would discard their changes.
+  getBase() { try { return localStorage.getItem(STORE.syncBase); } catch { return null; } },
+  setBase(v) { try { v ? localStorage.setItem(STORE.syncBase, v) : localStorage.removeItem(STORE.syncBase); } catch {} },
+
   async pullOrPush() {
     if (!ensureSb() || !this.user) return;
     this.setStatus('syncing');
@@ -2222,6 +2304,7 @@ const Sync = {
       if (error) throw error;
       if (data && data.payload && Array.isArray(data.payload.bills) && data.payload.bills.length > 0) {
         this.applyPayload(data.payload);
+        this.setBase(data.updated_at || null);
         this.setStatus('synced');
       } else {
         await this._pushNow();
@@ -2244,18 +2327,54 @@ const Sync = {
     clearTimeout(this.pushTimer);
     this._pushNow();
   },
-  async _pushNow() {
+  async _pushNow(opts = {}) {
     if (!ensureSb() || !this.user) return;
     this.setStatus('syncing');
     try {
+      // Stale-write guard: if the cloud row moved on from the version this
+      // device started from, another device saved in the meantime. Ask
+      // rather than clobber. (First-ever push has no base and just writes.)
+      if (!opts.force) {
+        const base = this.getBase();
+        if (base) {
+          const { data: cur, error: curErr } = await sb
+            .from('paycheck_data').select('updated_at').maybeSingle();
+          if (curErr) throw curErr;
+          if (cur && cur.updated_at && cur.updated_at !== base) {
+            this.setStatus('conflict', 'another device saved newer data');
+            promptSyncConflict(cur.updated_at);
+            return;
+          }
+        }
+      }
+      const stamp = new Date().toISOString();
       const { error } = await sb.from('paycheck_data').upsert({
         user_id: this.user.id,
         payload: this.payloadFromState(),
-        updated_at: new Date().toISOString()
+        updated_at: stamp
       });
       if (error) throw error;
+      this.setBase(stamp);
       this.clearDirty();
       this.setStatus('synced');
+    } catch (e) { this.setStatus('error', e.message); }
+  },
+  // Overwrite the cloud with this device's data, ignoring the newer row.
+  async forcePush() { await this._pushNow({ force: true }); },
+  // Throw away this device's unpushed edits and take the cloud copy.
+  async forcePull() {
+    if (!ensureSb() || !this.user) return;
+    this.setStatus('syncing');
+    try {
+      const { data, error } = await sb.from('paycheck_data').select('payload,updated_at').maybeSingle();
+      if (error) throw error;
+      if (data && data.payload) {
+        this.applyPayload(data.payload);
+        this.setBase(data.updated_at || null);
+      }
+      this.clearDirty();
+      this.setStatus('synced');
+      navigate();
     } catch (e) { this.setStatus('error', e.message); }
   }
 };
@@ -2393,7 +2512,11 @@ function openModal(html, opts = {}) {
   back.className = 'modal-backdrop' + (opts.fullscreen ? ' modal-backdrop-full' : '');
   back.innerHTML = `<div class="modal${opts.fullscreen ? ' modal-full' : ''}" role="dialog" aria-modal="true">${html}</div>`;
   root.appendChild(back);
-  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+  const close = () => {
+    back.remove();
+    document.removeEventListener('keydown', onKey);
+    if (opts.onClose) { try { opts.onClose(); } catch {} }
+  };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
@@ -2415,6 +2538,94 @@ function confirmDialog(message, onYes) {
     }
   });
   return m;
+}
+
+// Shown when a push would overwrite a newer row written by another device.
+// Deliberately offers no "merge" — the payload is a single blob, so the only
+// honest options are keep mine or take theirs.
+let conflictDialogOpen = false;
+function promptSyncConflict(theirStamp) {
+  if (conflictDialogOpen) return;
+  conflictDialogOpen = true;
+  let when = 'just now';
+  try { when = new Date(theirStamp).toLocaleString(); } catch {}
+  openModal(`
+    <div class="modal-header"><h3 class="serif">Sync conflict</h3></div>
+    <div class="modal-body">
+      <p>Another device saved changes on <strong>${escapeHtml(when)}</strong>, after the copy this device started from.</p>
+      <p style="color:var(--ink-soft);">Your data is a single saved blob, so one version has to win. Nothing has been overwritten yet.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-x="theirs">Use other device</button>
+      <button class="btn btn-primary" data-x="mine">Keep this device</button>
+    </div>
+  `, {
+    onMount(el, close) {
+      el.querySelector('[data-x="mine"]').onclick = () => { close(); Sync.forcePush(); };
+      el.querySelector('[data-x="theirs"]').onclick = () => { close(); Sync.forcePull(); };
+    },
+    onClose() { conflictDialogOpen = false; }
+  });
+}
+
+/* ------------------------- Toasts ------------------------- */
+// Transient bottom-center message, optionally with a single action (Undo).
+// Dismissing by timeout or ✕ runs onExpire, which is where a deferred
+// destructive commit belongs.
+function showToast(message, opts = {}) {
+  const { actionLabel = null, onAction = null, onExpire = null, duration = 10000 } = opts;
+  let wrap = document.querySelector('.toast-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.className = 'toast-wrap';
+    document.body.appendChild(wrap);
+  }
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.setAttribute('role', 'status');
+  el.innerHTML = `
+    <span class="toast-msg">${message}</span>
+    ${actionLabel ? `<button class="toast-action" type="button">${escapeHtml(actionLabel)}</button>` : ''}
+    <button class="toast-close" type="button" aria-label="Dismiss">✕</button>
+  `;
+  wrap.appendChild(el);
+
+  let settled = false;
+  const remove = () => {
+    el.classList.add('leaving');
+    setTimeout(() => { el.remove(); if (!wrap.children.length) wrap.remove(); }, 150);
+  };
+  const dismiss = (ranAction) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    if (!ranAction && onExpire) { try { onExpire(); } catch {} }
+    remove();
+  };
+  const timer = setTimeout(() => dismiss(false), duration);
+
+  const actionBtn = el.querySelector('.toast-action');
+  if (actionBtn) actionBtn.onclick = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    remove();
+    if (onAction) onAction();
+  };
+  el.querySelector('.toast-close').onclick = () => dismiss(false);
+  return { dismiss: () => dismiss(false) };
+}
+
+// Delete a bill straight away and offer a 10s undo instead of a confirm
+// prompt — the common case is intentional, and the mistake is recoverable.
+function deleteBillWithUndo(bill, after) {
+  const snap = State.snapshotBills();
+  State.deleteBill(bill.id);
+  if (after) after();
+  showToast(`Deleted <strong>${escapeHtml(bill.name)}</strong>.`, {
+    actionLabel: 'Undo',
+    onAction: () => { State.restoreBillsSnapshot(snap); navigate(); }
+  });
 }
 
 /* ------------------------- Views ------------------------- */
@@ -3367,6 +3578,21 @@ route('bills', (root) => {
       <span class="bills-total-count">${billCount} active bill${billCount === 1 ? '' : 's'}</span>
     </div>
     ${
+      State.bills.length === 0 ? '' : `
+      <div class="bills-filter">
+        <input type="search" id="bill-search" placeholder="Search bills…" autocomplete="off" aria-label="Search bills" />
+        <select id="bill-filter-cat" aria-label="Filter by category">
+          <option value="">All categories</option>
+          ${State.orderedCategories().map((c) => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('')}
+        </select>
+        <select id="bill-filter-shape" aria-label="Filter by payment shape">
+          <option value="">All shapes</option>
+          ${Object.entries(SHAPE_LABELS).map(([v, l]) => `<option value="${v}">${escapeHtml(l)}</option>`).join('')}
+        </select>
+        <div class="bills-filter-meta" id="bill-filter-meta"></div>
+      </div>`
+    }
+    ${
       State.bills.length === 0
       ? `<div class="card empty">${emptySvg()}<h3>No bills yet</h3><p>Tap “Add bill” to get started.</p></div>`
       : (() => {
@@ -3397,8 +3623,9 @@ route('bills', (root) => {
                   ${bills.map((b) => {
                     const dueInfo = (State.dueSoonEnabled && !b.archived && Number(b.amount) > 0 && (!b.recurrence || b.recurrence === 'monthly') && State.isDueSoonCat((b.category || '').trim() || 'Uncategorized')) ? dueSoonInfoFor(b) : null;
                     const soon = dueInfo && dueInfo.soon;
+                    const effShape = (b.shape && b.shape !== 'inherit') ? b.shape : State.getCatShape(cat);
                     return `
-                    <div class="bill-row${b.archived ? ' bill-archived' : ''}${soon ? ' due-soon' : ''}" role="listitem" data-id="${b.id}" tabindex="0">
+                    <div class="bill-row${b.archived ? ' bill-archived' : ''}${soon ? ' due-soon' : ''}" role="listitem" data-id="${b.id}" tabindex="0" data-shape="${escapeAttr(effShape)}" data-search="${escapeAttr(((b.name || '') + ' ' + cat).toLowerCase())}">
                       <div>
                         <span class="bill-name">${escapeHtml(b.name)}</span>
                         <span class="bill-meta">${
@@ -3435,6 +3662,66 @@ route('bills', (root) => {
     });
     row.addEventListener('keypress', (e) => { if (e.key === 'Enter') openBillEditor(row.dataset.id); });
   });
+
+  // Search + filter. Filters the rendered DOM in place rather than re-running
+  // the route, so the caret and keyboard stay put while typing.
+  const searchEl = $('#bill-search');
+  if (searchEl) {
+    const catEl = $('#bill-filter-cat');
+    const shapeEl = $('#bill-filter-shape');
+    const metaEl = $('#bill-filter-meta');
+    const FKEY = 'bills.filter';
+    const applyFilter = () => {
+      const q = searchEl.value.trim().toLowerCase();
+      const cat = catEl.value;
+      const shape = shapeEl.value;
+      const active = !!(q || cat || shape);
+      let shown = 0, total = 0;
+      $$('.cat-group').forEach((group) => {
+        const groupCat = group.dataset.cat;
+        let visibleInGroup = 0;
+        group.querySelectorAll('.bill-row').forEach((row) => {
+          total++;
+          const hit =
+            (!q || (row.dataset.search || '').includes(q)) &&
+            (!cat || groupCat === cat) &&
+            (!shape || row.dataset.shape === shape);
+          row.classList.toggle('filtered-out', !hit);
+          if (hit) { visibleInGroup++; shown++; }
+        });
+        group.classList.toggle('filtered-out', visibleInGroup === 0);
+        // A collapsed category would hide its own matches, so force groups
+        // open while a filter is live and restore the saved state after.
+        if (active) group.classList.remove('collapsed');
+        else group.classList.toggle('collapsed', State.isCatCollapsed(groupCat));
+      });
+      metaEl.innerHTML = active
+        ? `<span>Showing ${shown} of ${total} bill${total === 1 ? '' : 's'}</span><button type="button" id="bill-filter-clear">Clear</button>`
+        : '';
+      const clearBtn = $('#bill-filter-clear');
+      if (clearBtn) clearBtn.onclick = () => {
+        searchEl.value = ''; catEl.value = ''; shapeEl.value = '';
+        sessionStorage.removeItem(FKEY);
+        applyFilter();
+        searchEl.focus();
+      };
+      try { sessionStorage.setItem(FKEY, JSON.stringify({ q: searchEl.value, cat, shape })); } catch {}
+    };
+    // Restore the filter across re-renders (edit a bill, delete one, etc.)
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(FKEY) || 'null');
+      if (saved) {
+        searchEl.value = saved.q || '';
+        if (saved.cat && [...catEl.options].some((o) => o.value === saved.cat)) catEl.value = saved.cat;
+        if (saved.shape) shapeEl.value = saved.shape;
+      }
+    } catch {}
+    searchEl.addEventListener('input', applyFilter);
+    searchEl.addEventListener('search', applyFilter);
+    catEl.addEventListener('change', applyFilter);
+    shapeEl.addEventListener('change', applyFilter);
+    applyFilter();
+  }
   const rerenderKeepScroll = () => {
     const y = window.scrollY;
     navigate();
@@ -3579,8 +3866,13 @@ route('bills', (root) => {
       const cat = btn.dataset.catDelete;
       const count = State.bills.filter((b) => ((b.category && b.category.trim()) || 'Uncategorized') === cat).length;
       confirmDialog(`Delete <strong>${escapeHtml(cat)}</strong> and its ${count} bill${count === 1 ? '' : 's'}?`, () => {
+        const snap = State.snapshotBills();
         State.deleteCategory(cat);
         rerenderKeepScroll();
+        showToast(
+          `Deleted <strong>${escapeHtml(cat)}</strong> and ${count} bill${count === 1 ? '' : 's'}.`,
+          { actionLabel: 'Undo', onAction: () => { State.restoreBillsSnapshot(snap); navigate(); } }
+        );
       });
     };
   });
@@ -3604,10 +3896,8 @@ route('bills', (root) => {
       e.stopPropagation();
       const id = b.dataset.del;
       const bill = State.bills.find((x) => x.id === id);
-      confirmDialog(`Delete <strong>${escapeHtml(bill.name)}</strong>?`, () => {
-        State.deleteBill(id);
-        navigate();
-      });
+      if (!bill) return;
+      deleteBillWithUndo(bill, () => navigate());
     };
   });
   attachFab();
@@ -3775,11 +4065,9 @@ function openBillEditor(id) {
       };
       const delBtn = el.querySelector('[data-x="del"]');
       if (delBtn) delBtn.onclick = () => {
-        confirmDialog(`Delete <strong>${escapeHtml(b.name)}</strong>?`, () => {
-          State.deleteBill(b.id);
-          close();
-          navigate();
-        });
+        const existing = State.bills.find((x) => x.id === b.id);
+        close();
+        deleteBillWithUndo(existing || b, () => navigate());
       };
       const archBtn = el.querySelector('[data-x="archive"]');
       if (archBtn) archBtn.onclick = () => {
@@ -4326,7 +4614,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v114 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v115 · ledger edition</p>
       </div>
     </div>
 
@@ -4408,6 +4696,8 @@ route('settings', (root) => {
           <li>Tap the ✕ on a category header to delete the category and all its bills.</li>
           <li>Use <strong>Show archived</strong> to see bills you've archived.</li>
           <li>Bills coming due within your due-soon window get a highlight tint + "due in Nd" chip.</li>
+          <li><strong>Search</strong> matches bill names and category names. The two dropdowns narrow by category and by payment shape, and they stack with the search box. Collapsed categories open automatically while a filter is active.</li>
+          <li>Deleting a bill happens immediately with a 10-second <strong>Undo</strong>; deleting a whole category still asks first, then also offers Undo. Undo puts rows back in their original order.</li>
         </ul>
       </div>
       <div class="card">
@@ -4425,6 +4715,7 @@ route('settings', (root) => {
         <h2>Sync & backup</h2>
         <p style="color:var(--ink-soft);">Sign in with email + password under the <em>Sync</em> tab. Sign-in happens inside the app (works on iOS home-screen installs). Changes push to Supabase automatically after ~1s. Sign in on another device with the same account to pull your data.</p>
         <p style="color:var(--ink-soft); font-size:13px;">Regular <em>Data → Export JSON</em> gives a manual backup file. The Optimize snapshot is local-only (not synced).</p>
+        <p style="color:var(--ink-soft); font-size:13px;"><strong>Sync conflicts.</strong> Your data saves as a single blob, so two devices editing between syncs can't be merged. If another device saved after the copy this device started from, the push stops and asks: <em>Keep this device</em> overwrites the cloud with what's on screen, <em>Use other device</em> replaces this device with the cloud copy. Nothing is overwritten until you choose, and dismissing the prompt just retries later.</p>
       </div>
       <div class="card">
         <h2>Bills page monthly total</h2>
