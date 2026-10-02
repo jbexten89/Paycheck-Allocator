@@ -217,6 +217,21 @@
   .settings-section { display: none !important; }
   .settings-section.active { display: grid !important; }
   .view-header .sub { color: var(--ink-muted); font-size: 13px; }
+  /* On a phone the header was costing 12-17% of the screen. The subtitle is
+     read once, and the tab bar already says which page you're on, so collapse
+     to a single title + action line. Desktop has the room and keeps both. */
+  @media (max-width: 768px) {
+    .view-header {
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding-bottom: 0;
+    }
+    .view-header .sub { display: none; }
+    .view-header h1 { font-size: 20px; margin: 0; }
+    /* Keep the action from squeezing a long title onto two lines */
+    .view-header > .row, .view-header > :last-child { flex: none; }
+  }
 
   .view { animation: fade 200ms ease; }
   @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -4745,7 +4760,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v119 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v120 · ledger edition</p>
       </div>
     </div>
 
