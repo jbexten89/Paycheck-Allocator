@@ -496,6 +496,8 @@
   .bills-total-amount { font-size: 18px; font-weight: 600; color: var(--good); font-variant-numeric: tabular-nums; }
   .bills-total-count { font-size: 12px; color: var(--ink-muted); margin-left: auto; }
   .badge.badge-var { color: var(--accent); border-color: rgba(59,130,246,0.4); }
+  .badge.badge-credit { color: var(--good); border-color: rgba(52,211,153,0.45); }
+  .badge.badge-short { color: var(--danger); border-color: rgba(248,113,113,0.45); }
   /* Inline text button that reads as a link */
   .btn-link {
     background: none; border: none; padding: 0; cursor: pointer;
@@ -986,7 +988,8 @@ const STORE = {
   sinkingFund: 'paycheck_allocator.sinking_fund',
   syncDirty: 'paycheck_allocator.sync_dirty',
   syncBase: 'paycheck_allocator.sync_base',
-  collapsedSections: 'paycheck_allocator.collapsed_sections'
+  collapsedSections: 'paycheck_allocator.collapsed_sections',
+  rollActuals: 'paycheck_allocator.roll_actuals'
 };
 
 const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -1116,7 +1119,59 @@ function nextDueCycleFor(bill, P) {
  *  - Skip bills with amount <= 0.
  *  - Clamp due day to days-in-month.
  *  - Maintain running balance per bill, seeded with initialSaved, resets when due passes.
+ *  - First cycle only: also apply any carry from the most recent logged actual.
  */
+
+/* ---------------- Logged actuals and carry ---------------- */
+// A bill can record what it actually cost each cycle:
+//   history: [{ due: 'YYYY-MM-DD', actual: 142.18, planned: 160, at: ISO }]
+// `planned` is the target that cycle was funded at, stored at log time so
+// later edits to the bill's amount don't rewrite history.
+//
+// Carry is read from the LATEST logged entry only, never summed. Each entry's
+// `planned` already accounts for the carry that preceded it, so the chain
+// telescopes: over-save $18 in October and November's target drops to $142; if
+// November then costs $150, December's target rises by the $8 shortfall.
+// Summing every entry instead would double-count surpluses already spent.
+function billHistory(bill) {
+  const h = (bill && Array.isArray(bill.history)) ? bill.history : [];
+  return h.filter((e) => e && e.due).slice().sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
+}
+// Only entries for cycles that have already passed can affect the next one —
+// logging the current cycle early must not discount the cycle it belongs to.
+function settledHistory(bill, today) {
+  const cutoff = toISO(today || new Date());
+  return billHistory(bill).filter((e) => e.due < cutoff);
+}
+function carryFrom(entries) {
+  if (!entries.length) return 0;
+  const last = entries[entries.length - 1];
+  return Math.round(((Number(last.planned) || 0) - (Number(last.actual) || 0)) * 100) / 100;
+}
+// Positive = saved more than the bill cost, so the next cycle needs less.
+function billCarry(bill) {
+  if (typeof State !== 'undefined' && State.rollActuals === false) return 0;
+  return carryFrom(settledHistory(bill));
+}
+// What the next unlogged cycle is being funded at — what we store as `planned`.
+function plannedForDue(bill, dueISO) {
+  const prior = billHistory(bill).filter((e) => e.due < dueISO);
+  const carry = (typeof State !== 'undefined' && State.rollActuals === false) ? 0 : carryFrom(prior);
+  return Math.max(0, Math.round(((Number(bill.amount) || 0) - carry) * 100) / 100);
+}
+function billActualStats(bill) {
+  const h = billHistory(bill);
+  if (!h.length) return null;
+  const vals = h.map((e) => Number(e.actual) || 0);
+  const sum = vals.reduce((s, v) => s + v, 0);
+  return {
+    count: vals.length,
+    min: Math.min(...vals),
+    max: Math.max(...vals),
+    avg: Math.round((sum / vals.length) * 100) / 100,
+    last: h[h.length - 1]
+  };
+}
 // Calendar-day difference (b - a), ignoring time-of-day so DST doesn't skew.
 function dayDiff(a, b) {
   const A = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
@@ -1270,8 +1325,10 @@ function computeAllocations(bills, payDates, opts = {}) {
         cellCredit = cellEffectiveByKey[cycleKey] || 0;
       }
       const effectiveAmount = Math.max(0, Number(bill.amount) - cellCredit);
+      // Carry lands on the first upcoming cycle, same as initialSaved. A
+      // negative carry (last bill came in over) legitimately raises the target.
       const baseAmount = cycleIndex === 0
-        ? Math.max(0, effectiveAmount - Number(bill.initialSaved || 0))
+        ? Math.max(0, effectiveAmount - Number(bill.initialSaved || 0) - billCarry(bill))
         : effectiveAmount;
       // Detect if this iteration is the last visible pay in the current cycle
       const isLastVisibleInCycle = (i + 1 >= payDates.length)
@@ -1705,6 +1762,8 @@ const State = {
     try { localStorage.removeItem('paycheck_allocator.goals'); } catch {}
     try { localStorage.removeItem('paycheck_allocator.spillover_enabled'); } catch {}
     this.roundSetAside = localStorage.getItem(STORE.roundSetAside) === '1';
+    // Default on: a logged actual that changes nothing is just bookkeeping.
+    this.rollActuals = localStorage.getItem(STORE.rollActuals) !== '0';
     // Which shapes the Optimize button is allowed to try. Default: all except bi-monthly-rate.
     const DEFAULT_OPT_SHAPES = ['spread','weighted-spread','single-cycle','first-cycle','first-two-of-three','last-two-of-three','monthly-rate'];
     try {
@@ -1873,6 +1932,7 @@ const State = {
     this.saveSinkingFund();
   },
   setRoundSetAside(v) { this.roundSetAside = !!v; localStorage.setItem(STORE.roundSetAside, v ? '1' : '0'); },
+  setRollActuals(v) { this.rollActuals = !!v; localStorage.setItem(STORE.rollActuals, v ? '1' : '0'); },
   setOptimizeShapeAllowed(shape, allowed) {
     if (!shape) return;
     if (allowed) this.optimizeShapes.add(shape);
@@ -2206,6 +2266,7 @@ const Sync = {
       leftoverViewEnabled: State.leftoverViewEnabled,
       sinkingFund: State.sinkingFund,
       roundSetAside: State.roundSetAside,
+      rollActuals: State.rollActuals,
       optimizeShapes: [...State.optimizeShapes],
       flexOverrides: State.flexOverrides,
       flexEditEnabled: State.flexEditEnabled,
@@ -2246,6 +2307,7 @@ const Sync = {
     if (typeof p.leftoverViewEnabled === 'boolean') { State.setLeftoverViewEnabled(p.leftoverViewEnabled); }
     if (p.sinkingFund && typeof p.sinkingFund === 'object') { State.sinkingFund = { ...State.sinkingFund, ...p.sinkingFund }; State.saveSinkingFund(); }
     if (typeof p.roundSetAside === 'boolean') { State.setRoundSetAside(p.roundSetAside); }
+    if (typeof p.rollActuals === 'boolean') { State.setRollActuals(p.rollActuals); }
     if (Array.isArray(p.optimizeShapes)) {
       State.optimizeShapes = new Set(p.optimizeShapes);
       if (!State.optimizeShapes.has('spread')) State.optimizeShapes.add('spread');
@@ -3790,7 +3852,11 @@ route('bills', (root) => {
                           : b.recurrence === 'everyNMonths'
                             ? `Every ${b.intervalMonths || 1}mo from ${b.dueAnchor ? fmtDateShort.format(parseISO(b.dueAnchor)) : '—'}`
                             : `Due ${b.dueDay}`
-                        }${b.variable ? `<span class="badge badge-var">${billRangeLabel(b)}</span>` : ''}${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}${b.archived ? `<span class="badge">archived</span>` : ''}${dueSoonChipHtml(dueInfo)}</span>
+                        }${b.variable ? `<span class="badge badge-var">${billRangeLabel(b)}</span>` : ''}${(() => {
+                          const c = billCarry(b);
+                          if (!c) return '';
+                          return `<span class="badge ${c > 0 ? 'badge-credit' : 'badge-short'}">${c > 0 ? fmtUSD.format(c) + ' credit' : fmtUSD.format(-c) + ' short'}</span>`;
+                        })()}${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}${b.archived ? `<span class="badge">archived</span>` : ''}${dueSoonChipHtml(dueInfo)}</span>
                       </div>
                       <div class="bill-amount">${fmtUSD.format(b.amount)}</div>
                       <span class="drag-handle" aria-label="Drag to reorder">⋮⋮</span>
@@ -4193,6 +4259,7 @@ function openBillEditor(id) {
           </select>
           <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">Overrides the category's shape for this one bill (e.g. spread Mortgage while other Housing bills use once-per-cycle).</div>
         </div>
+        <div class="full" id="actuals"></div>
         <div class="full" id="preview"></div>
       </div>
     </form>
@@ -4267,6 +4334,87 @@ function openBillEditor(id) {
           shape: (() => { const s = fd.get('shape'); return (!s || s === 'inherit') ? '' : s; })()
         };
       };
+      // Logged actuals live on `b` directly rather than in the form, since they
+      // are their own records — editing them shouldn't need a Save.
+      const actualsBox = el.querySelector('#actuals');
+      const renderActuals = () => {
+        if (isNew) { actualsBox.innerHTML = ''; return; }
+        const hist = billHistory(b);
+        const stats = billActualStats(b);
+        const carry = billCarry(b);
+        const nextDue = toISO(nextDueCycleFor(b, new Date()).D);
+        const draft = readDraft();
+        actualsBox.innerHTML = `
+          <hr class="rule"/>
+          <div class="label" style="margin-bottom:6px;">What it actually cost</div>
+          <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-bottom:8px;">
+            Log the real amount once a bill is paid. ${
+              State.rollActuals
+                ? 'The difference adjusts the next cycle automatically.'
+                : 'Roll-forward is off in Settings → Rules, so these are recorded but don\'t change allocations.'
+            }
+          </div>
+          ${hist.length ? `
+            <table class="schedule" style="min-width:0; margin-bottom:8px;">
+              <thead><tr><th>Due</th><th>Planned</th><th>Actual</th><th>Diff</th><th></th></tr></thead>
+              <tbody>
+                ${hist.slice().reverse().map((e) => {
+                  const diff = (Number(e.planned) || 0) - (Number(e.actual) || 0);
+                  return `<tr>
+                    <td>${fmtDateShort.format(parseISO(e.due))}</td>
+                    <td>${fmtUSD.format(Number(e.planned) || 0)}</td>
+                    <td class="total">${fmtUSD.format(Number(e.actual) || 0)}</td>
+                    <td style="color:${diff < 0 ? 'var(--danger)' : 'var(--good)'};">${diff < 0 ? '−' : '+'}${fmtUSD.format(Math.abs(diff))}</td>
+                    <td><button type="button" class="btn btn-ghost" data-del-actual="${escapeAttr(e.due)}" aria-label="Remove">✕</button></td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+            <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-bottom:8px;">
+              ${stats.count} logged · low ${fmtUSD.format(stats.min)} · avg ${fmtUSD.format(stats.avg)} · high ${fmtUSD.format(stats.max)}
+              ${carry !== 0 ? ` · <strong style="color:${carry > 0 ? 'var(--good)' : 'var(--danger)'};">${carry > 0 ? fmtUSD.format(carry) + ' credit' : fmtUSD.format(-carry) + ' short'}</strong> applied to the next cycle` : ''}
+            </div>
+            ${draft.variable && stats.count >= 2 && stats.max > stats.min
+              ? `<button type="button" class="btn" id="use-as-range" style="margin-bottom:10px;">Use ${moneyRange(stats.min, stats.max)} as my range</button>`
+              : ''}
+          ` : '<div class="hint" style="font-size:11px; color:var(--ink-muted); margin-bottom:8px;">Nothing logged yet.</div>'}
+          <div style="display:grid; grid-template-columns: 1fr 1fr auto; gap:8px; align-items:end;">
+            <div>
+              <label>Due date</label>
+              <input id="actual-due" type="date" value="${nextDue}" />
+            </div>
+            <div>
+              <label>Actual amount</label>
+              <input id="actual-amt" type="number" min="0" step="0.01" placeholder="0.00" />
+            </div>
+            <button type="button" class="btn btn-primary" id="log-actual">Log</button>
+          </div>
+        `;
+        actualsBox.querySelectorAll('[data-del-actual]').forEach((btn) => {
+          btn.onclick = () => {
+            b.history = billHistory(b).filter((e) => e.due !== btn.dataset.delActual);
+            State.upsertBill({ ...State.bills.find((x) => x.id === b.id), history: b.history });
+            renderActuals(); renderPreview();
+          };
+        });
+        const logBtn = actualsBox.querySelector('#log-actual');
+        if (logBtn) logBtn.onclick = () => {
+          const due = actualsBox.querySelector('#actual-due').value;
+          const actual = parseFloat(actualsBox.querySelector('#actual-amt').value);
+          if (!due || !(actual >= 0) || !isFinite(actual)) return;
+          const planned = plannedForDue({ ...b, amount: readDraft().amount }, due);
+          b.history = billHistory(b).filter((e) => e.due !== due).concat([{ due, actual, planned, at: new Date().toISOString() }]);
+          State.upsertBill({ ...State.bills.find((x) => x.id === b.id), history: b.history });
+          renderActuals(); renderPreview();
+        };
+        const rangeBtn = actualsBox.querySelector('#use-as-range');
+        if (rangeBtn) rangeBtn.onclick = () => {
+          form.amountMin.value = stats.min.toFixed(2);
+          form.amountMax.value = stats.max.toFixed(2);
+          form.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+      };
+
       const renderPreview = () => {
         const draft = readDraft();
         const planHint = el.querySelector('#plan-hint');
@@ -4293,6 +4441,7 @@ function openBillEditor(id) {
           </table>
         `;
       };
+      renderActuals();
       renderPreview();
       form.addEventListener('input', renderPreview);
       el.querySelectorAll('[data-x="close"]').forEach((x) => x.onclick = close);
@@ -4586,6 +4735,11 @@ route('settings', (root) => {
           <input id="round-set-aside" type="checkbox" ${State.roundSetAside ? 'checked' : ''} style="width:auto;" />
           <label for="round-set-aside" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Round set-aside amounts to the nearest $1</label>
         </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <input id="roll-actuals" type="checkbox" ${State.rollActuals ? 'checked' : ''} style="width:auto;" />
+          <label for="roll-actuals" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">Roll logged actuals into the next cycle</label>
+        </div>
+        <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px; margin-left:26px;">When a logged bill comes in under or over what you set aside, adjust the next cycle by the difference. Off: actuals are kept as history only.</div>
       </div>
       <div class="card">
         <h2>Window sizes</h2>
@@ -4858,7 +5012,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v121 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v122 · ledger edition</p>
       </div>
     </div>
 
@@ -4939,6 +5093,9 @@ route('settings', (root) => {
           <li>Drag the ⋮⋮ handle on a row or header to reorder within a category (or reorder categories).</li>
           <li>Tap the ✕ on a category header to delete the category and all its bills.</li>
           <li><strong>Variable amount</strong> — tick it on a bill that moves month to month (electric, water) and give a typical low and high. The app still sets aside one number each pay; <em>Set aside using</em> picks which end of the range that is, defaulting to the high end because under-saving is the expensive mistake. The range shows as a badge on the row, and the Monthly total gains a low–high figure so a total built on estimates doesn't read as exact.</li>
+          <li><strong>Logging actuals</strong> — open a bill and use <em>What it actually cost</em> to record the real amount for a due date. Entries save immediately, independently of the bill's own Save. The table shows planned vs actual with the difference, plus low / average / high across everything logged.</li>
+          <li><strong>Roll-forward</strong> — by default the difference adjusts the next cycle: set aside $160, the bill comes in at $142, and the next cycle asks for $142. If the following bill then runs over, the cycle after that rises to compensate. Only the first upcoming cycle is affected, exactly like <em>Already saved</em>. The row shows a <span class="badge badge-credit">credit</span> or <span class="badge badge-short">short</span> badge when a carry is pending. Turn it off in Settings → Rules to keep actuals as history only.</li>
+          <li>For a <strong>variable</strong> bill with two or more actuals logged, the editor offers <em>Use $X–$Y as my range</em> to replace your estimate with what the bill has really done.</li>
           <li><strong>Show archived (N)</strong> reveals archived bills; the number is how many there are. The button only appears when something is actually archived.</li>
           <li>Bills coming due within your due-soon window get a highlight tint + "due in Nd" chip.</li>
           <li><strong>Search</strong> matches bill names and category names. The two dropdowns narrow by category and by payment shape, and they stack with the search box. Collapsed categories open automatically while a filter is active.</li>
@@ -5134,6 +5291,8 @@ route('settings', (root) => {
   });
   const roundEl = $('#round-set-aside');
   if (roundEl) roundEl.onchange = (e) => { State.setRoundSetAside(e.target.checked); navigate(); };
+  const rollEl = $('#roll-actuals');
+  if (rollEl) rollEl.onchange = (e) => { State.setRollActuals(e.target.checked); navigate(); };
   $$('.inline-edit-cat').forEach((el) => {
     el.onchange = () => { State.setInlineEditCat(el.dataset.cat, el.checked); };
   });
