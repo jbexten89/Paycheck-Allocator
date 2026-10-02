@@ -199,6 +199,24 @@
     padding-left: 16px;
     padding-right: 16px;
   }
+  /* On a phone the six tabs totalled 404px against a 375px viewport, so Help
+     sat off-screen behind a scrollbar that's deliberately hidden — no way to
+     tell it was there. The labels themselves are only ~212px; the rest was
+     padding, so let them share the width instead of scrolling. */
+  @media (max-width: 768px) {
+    .settings-tabs {
+      overflow-x: visible;
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+    .settings-tabs .tab-btn {
+      flex: 1 1 0;
+      min-width: 0;
+      padding: 10px 2px;
+      font-size: 13px;
+      text-align: center;
+    }
+  }
   .settings-tabs::-webkit-scrollbar { display: none; }
   .tab-btn {
     background: transparent;
@@ -5035,7 +5053,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v123 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v124 · ledger edition</p>
       </div>
     </div>
 
