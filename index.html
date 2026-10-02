@@ -537,6 +537,23 @@
   .badge.badge-var { color: var(--accent); border-color: rgba(59,130,246,0.4); }
   .badge.badge-credit { color: var(--good); border-color: rgba(52,211,153,0.45); }
   .badge.badge-short { color: var(--danger); border-color: rgba(248,113,113,0.45); }
+  /* Collapsible income sources (Settings → Setup) */
+  .income-row { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .income-head { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+  .income-summary {
+    background: none; border: none; padding: 4px 0; margin: 0; cursor: pointer;
+    font: inherit; color: var(--ink); text-align: left;
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0;
+  }
+  .income-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+  .inc-chev { color: var(--ink-muted); font-size: 11px; flex: none; }
+  .inc-chev::before { content: '▾'; }
+  .income-row.collapsed .inc-chev::before { content: '▸'; }
+  .inc-name { font-weight: 600; font-size: 14px; }
+  .inc-meta { font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+  .inc-next { font-size: 12px; color: var(--accent); }
+  .income-body { margin-top: 10px; }
+  .income-row.collapsed .income-body { display: none !important; }
   /* Inline text button that reads as a link */
   .btn-link {
     background: none; border: none; padding: 0; cursor: pointer;
@@ -2084,6 +2101,7 @@ const State = {
     };
     this.incomes.push(item);
     this.saveIncomes();
+    return item;
   },
   updateIncome(id, patch) {
     const i = this.incomes.findIndex((x) => x.id === id);
@@ -4752,8 +4770,14 @@ route('settings', (root) => {
         <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:10px;">Add each paycheck: yours, a spouse's, side gigs. Dashboard totals across them all.</div>
         <div id="incomes-list" style="display:flex; flex-direction:column; gap:10px;">
           ${(State.incomes || []).map((inc) => `
-            <div class="income-row" data-id="${inc.id}" style="border:1px solid var(--line); border-radius:10px; padding:10px; display:grid; grid-template-columns: 1fr auto; gap:8px;">
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <div class="income-row${openIncomeIds().has(inc.id) ? '' : ' collapsed'}" data-id="${inc.id}">
+              <div class="income-head">
+                <button type="button" class="income-summary" data-toggle-income="${inc.id}" aria-expanded="${openIncomeIds().has(inc.id) ? 'true' : 'false'}">
+                  ${incomeSummaryHtml(inc)}
+                </button>
+                <button class="btn btn-ghost" data-x="remove" aria-label="Remove income" title="Remove">✕</button>
+              </div>
+              <div class="income-body" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
                 <div style="grid-column: span 2;">
                   <label style="font-size:11px;">Name</label>
                   <input data-f="name" type="text" value="${escapeHtml(inc.name || '')}" placeholder="e.g. Paycheck" />
@@ -4791,7 +4815,6 @@ route('settings', (root) => {
                   </div>
                 </div>
               </div>
-              <button class="btn btn-ghost" data-x="remove" aria-label="Remove income" title="Remove" style="align-self:start;">✕</button>
             </div>
           `).join('')}
         </div>
@@ -5097,7 +5120,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v127 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v128 · ledger edition</p>
       </div>
     </div>
 
@@ -5118,6 +5141,7 @@ route('settings', (root) => {
         <p style="color:var(--ink-soft);">For each bill, the app finds the next due date after each paycheck and spreads the bill's amount across the paychecks that fall in that cycle. A paycheck landing on the due date funds the <em>next</em> cycle since the money can't clear in time.</p>
         <p style="color:var(--ink-soft);"><strong>Already saved</strong> reduces the first upcoming cycle only. Later cycles use the full amount.</p>
         <p style="color:var(--ink-soft); font-size:13px;">With multiple incomes, pay dates from every source are merged into a single timeline — same-day pays sum. Per-pay comparisons on the dashboard use that specific pay's household income.</p>
+        <p style="color:var(--ink-soft); font-size:13px;">In <em>Settings → Setup</em> each income source shows as one summary line — name, amount, frequency, next payday, and a chip if it has scheduled changes. Tap it to open the full form. Which rows are open is remembered for the session only, and a source you've just added opens ready to type in.</p>
       </div>
       <div class="card">
         <h2>Payment shapes (Rules tab)</h2>
@@ -5249,16 +5273,40 @@ route('settings', (root) => {
   $('#leftover-months').onchange = (e) => { State.setLeftoverMonths(parseInt(e.target.value, 10)); };
   const addIncomeBtn = $('#add-income');
   if (addIncomeBtn) addIncomeBtn.onclick = () => {
-    State.addIncome({
+    const added = State.addIncome({
       name: 'Paycheck',
       amount: 0,
       frequency: 'biweekly',
       payStart: State.payStart || toISO(new Date())
     });
+    // A new source has nothing worth summarising, so open it ready to fill in.
+    if (added && added.id) setIncomeOpen(added.id, true);
     navigate();
+    const row = added && document.querySelector(`.income-row[data-id="${added.id}"]`);
+    if (row) {
+      row.scrollIntoView({ block: 'center' });
+      const nameInput = row.querySelector('[data-f="name"]');
+      if (nameInput) { nameInput.focus(); nameInput.select(); }
+    }
   };
+  // Expand / collapse in place rather than re-rendering, so a half-typed
+  // field elsewhere on the page keeps its value and focus.
+  $$('#incomes-list [data-toggle-income]').forEach((btn) => {
+    btn.onclick = () => {
+      const row = btn.closest('.income-row');
+      const nowOpen = row.classList.toggle('collapsed') === false;
+      btn.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
+      setIncomeOpen(btn.dataset.toggleIncome, nowOpen);
+    };
+  });
   $$('#incomes-list .income-row').forEach((row) => {
     const id = row.dataset.id;
+    // Keep the collapsed summary honest while its fields are being edited.
+    const refreshSummary = () => {
+      const inc = (State.incomes || []).find((x) => x.id === id);
+      const btn = row.querySelector('[data-toggle-income]');
+      if (inc && btn) btn.innerHTML = incomeSummaryHtml(inc);
+    };
     row.querySelectorAll('[data-f]').forEach((inp) => {
       inp.onchange = () => {
         const field = inp.dataset.f;
@@ -5273,6 +5321,7 @@ route('settings', (root) => {
           if (field === 'frequency' && incs[0].id === id) State.setFrequency(val);
           if (field === 'payStart' && incs[0].id === id && val) State.setPayStart(val);
         }
+        refreshSummary();
       };
     });
     const rm = row.querySelector('[data-x="remove"]');
@@ -5541,6 +5590,41 @@ async function maybeShowOnboarding(initPromise, ceilingMs = 3000) {
   return 'shown';
 }
 maybeShowOnboarding(syncInitDone);
+
+/* ------------- Income rows (Settings → Setup) ------------- */
+// Each source renders its whole form permanently, which cost 374px per row.
+// Collapsed by default; which rows are open is per-session, not synced —
+// it's a reading state, not a setting.
+function openIncomeIds() {
+  try { return new Set(JSON.parse(sessionStorage.getItem('settings.incomeOpen') || '[]')); }
+  catch { return new Set(); }
+}
+function setIncomeOpen(id, open) {
+  const s = openIncomeIds();
+  if (open) s.add(id); else s.delete(id);
+  try { sessionStorage.setItem('settings.incomeOpen', JSON.stringify([...s])); } catch {}
+}
+// The summary says "next <date>", so show the next pay that hasn't happened,
+// not the anchor date the field stores.
+function nextPayForIncome(inc) {
+  try {
+    if (!inc || !inc.payStart) return null;
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const ds = generatePayDates(parseISO(inc.payStart), 80, inc.frequency || 'biweekly');
+    return ds.find((d) => d >= t0) || ds[ds.length - 1] || null;
+  } catch { return null; }
+}
+function incomeSummaryHtml(inc) {
+  const next = nextPayForIncome(inc);
+  const changes = (inc.changes || []).length;
+  return `
+    <span class="inc-chev"></span>
+    <span class="inc-name">${escapeHtml(inc.name || 'Income')}</span>
+    <span class="inc-meta">${fmtUSD.format(Number(inc.amount) || 0)} · ${escapeHtml(inc.frequency || 'biweekly')}</span>
+    ${next ? `<span class="inc-next">next ${fmtDateShort.format(next)}</span>` : ''}
+    ${changes ? `<span class="badge">${changes} change${changes === 1 ? '' : 's'}</span>` : ''}
+  `;
+}
 
 // Jump straight to the sign-in form in Settings.
 function goToSync() {
