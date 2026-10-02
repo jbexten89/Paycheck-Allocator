@@ -2235,6 +2235,18 @@ const State = {
   }
 };
 
+// Timestamps round-trip through Postgres in a different textual form than
+// toISOString() produces, so they're compared as instants. Returns null when
+// either side can't be parsed — the caller treats that as "can't tell" and
+// lets the write through rather than inventing a conflict.
+function sameInstant(a, b) {
+  const ta = Date.parse(a), tb = Date.parse(b);
+  if (!isFinite(ta) || !isFinite(tb)) return null;
+  // Exact, not fuzzy: "+00:00" vs "Z" already collapses to the same
+  // millisecond, and any tolerance here would mask a real second writer.
+  return ta === tb;
+}
+
 /* ------------------------- Supabase sync ------------------------- */
 const Sync = {
   user: null,
@@ -2501,7 +2513,7 @@ const Sync = {
           const { data: cur, error: curErr } = await sb
             .from('paycheck_data').select('updated_at').maybeSingle();
           if (curErr) throw curErr;
-          if (cur && cur.updated_at && cur.updated_at !== base) {
+          if (cur && cur.updated_at && sameInstant(cur.updated_at, base) === false) {
             this.setStatus('conflict', 'another device saved newer data');
             promptSyncConflict(cur.updated_at);
             return;
@@ -2509,13 +2521,24 @@ const Sync = {
         }
       }
       const stamp = new Date().toISOString();
-      const { error } = await sb.from('paycheck_data').upsert({
+      // Read back what the server stored rather than assuming it kept our
+      // string: Postgres renders timestamptz as "...+00:00" (and may carry
+      // microseconds, or overwrite the value from a trigger), so trusting our
+      // own stamp made every later push look like someone else's write.
+      const { data: written, error } = await sb.from('paycheck_data').upsert({
         user_id: this.user.id,
         payload: this.payloadFromState(),
         updated_at: stamp
-      });
+      }).select('updated_at').maybeSingle();
       if (error) throw error;
-      this.setBase(stamp);
+      let serverStamp = written && written.updated_at;
+      if (!serverStamp) {
+        const { data: check } = await sb.from('paycheck_data').select('updated_at').maybeSingle();
+        serverStamp = check && check.updated_at;
+      }
+      // No readable stamp means we can't guard the next push. Clearing the
+      // base skips the check once, which is far better than failing it.
+      this.setBase(serverStamp || null);
       this.clearDirty();
       this.setStatus('synced');
       this.notifySaved();
@@ -5012,7 +5035,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v122 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v123 · ledger edition</p>
       </div>
     </div>
 
