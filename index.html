@@ -495,6 +495,7 @@
   .bills-total-label { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .bills-total-amount { font-size: 18px; font-weight: 600; color: var(--good); font-variant-numeric: tabular-nums; }
   .bills-total-count { font-size: 12px; color: var(--ink-muted); margin-left: auto; }
+  .badge.badge-var { color: var(--accent); border-color: rgba(59,130,246,0.4); }
   /* Inline text button that reads as a link */
   .btn-link {
     background: none; border: none; padding: 0; cursor: pointer;
@@ -3701,6 +3702,11 @@ route('bills', (root) => {
   const activeForTotal = State.bills.filter((b) => !b.archived && Number(b.amount) > 0);
   const monthlyTotal = activeForTotal.reduce((s, b) => s + monthlyEquivFor(b), 0);
   const billCount = activeForTotal.length;
+  // The headline total plans at each bill's chosen point in its range; show
+  // the spread too, so a number built on estimates doesn't read as certain.
+  const variableBills = activeForTotal.filter((b) => b.variable);
+  const monthlyLow = activeForTotal.reduce((s, b) => s + monthlyEquivFor(b.variable ? { ...b, amount: Number(b.amountMin) || 0 } : b), 0);
+  const monthlyHigh = activeForTotal.reduce((s, b) => s + monthlyEquivFor(b.variable ? { ...b, amount: Math.max(Number(b.amountMin) || 0, Number(b.amountMax) || 0) } : b), 0);
 
   root.innerHTML = `
     <div class="view-header">
@@ -3721,7 +3727,11 @@ route('bills', (root) => {
     <div class="bills-total-bar">
       <span class="bills-total-label">Monthly total</span>
       <span class="bills-total-amount">${fmtUSD.format(monthlyTotal)}</span>
-      <span class="bills-total-count">${billCount} active bill${billCount === 1 ? '' : 's'}</span>
+      <span class="bills-total-count">${billCount} active bill${billCount === 1 ? '' : 's'}${
+        variableBills.length && monthlyHigh > monthlyLow
+          ? ` · ${moneyRange(Math.round(monthlyLow), Math.round(monthlyHigh))}`
+          : ''
+      }</span>
     </div>
     ${
       State.bills.length === 0 ? '' : `
@@ -3780,7 +3790,7 @@ route('bills', (root) => {
                           : b.recurrence === 'everyNMonths'
                             ? `Every ${b.intervalMonths || 1}mo from ${b.dueAnchor ? fmtDateShort.format(parseISO(b.dueAnchor)) : '—'}`
                             : `Due ${b.dueDay}`
-                        }${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}${b.archived ? `<span class="badge">archived</span>` : ''}${dueSoonChipHtml(dueInfo)}</span>
+                        }${b.variable ? `<span class="badge badge-var">${billRangeLabel(b)}</span>` : ''}${b.initialSaved > 0 ? `<span class="badge">saved ${fmtUSD.format(b.initialSaved)}</span>` : ''}${b.archived ? `<span class="badge">archived</span>` : ''}${dueSoonChipHtml(dueInfo)}</span>
                       </div>
                       <div class="bill-amount">${fmtUSD.format(b.amount)}</div>
                       <span class="drag-handle" aria-label="Drag to reorder">⋮⋮</span>
@@ -4049,6 +4059,32 @@ route('bills', (root) => {
   attachFab();
 });
 
+// A variable bill still stores a single `amount` — the number everything
+// downstream (computeAllocations, the shapes, Optimize, monthly totals) plans
+// with. The range is metadata that derives it, which keeps variability out of
+// the allocation chain entirely.
+function planAmountFor(bill) {
+  if (!bill || !bill.variable) return Number(bill && bill.amount) || 0;
+  const lo = Number(bill.amountMin) || 0;
+  const hi = Math.max(lo, Number(bill.amountMax) || 0);
+  const at = bill.planAt || 'max';
+  const v = at === 'min' ? lo : at === 'mid' ? (lo + hi) / 2 : hi;
+  return Math.round(v * 100) / 100;
+}
+function billRangeLabel(bill) {
+  if (!bill || !bill.variable) return '';
+  const lo = Number(bill.amountMin) || 0;
+  const hi = Math.max(lo, Number(bill.amountMax) || 0);
+  return moneyRange(lo, hi);
+}
+// Ranges live in tight spots (a 10px badge, the one-line totals bar), so drop
+// the cents when both ends are whole numbers.
+function moneyRange(lo, hi) {
+  const whole = Number.isInteger(lo) && Number.isInteger(hi);
+  const f = (v) => whole ? '$' + v.toLocaleString('en-US') : fmtUSD.format(v);
+  return `${f(lo)}–${f(hi)}`;
+}
+
 function openBillEditor(id) {
   const isNew = !id;
   const b = isNew
@@ -4078,9 +4114,9 @@ function openBillEditor(id) {
           <label>Due day (1–31)</label>
           <input name="dueDay" type="number" min="1" max="31" value="${b.dueDay || 1}" />
         </div>
-        <div class="rec-monthly" ${b.recurrence === 'everyNWeeks' ? 'style="display:none;"' : ''}>
+        <div class="rec-monthly amt-fixed" ${b.recurrence === 'everyNWeeks' ? 'style="display:none;"' : ''}>
           <label>Amount</label>
-          <input name="amount" type="number" min="0" step="0.01" required value="${b.amount}" />
+          <input name="amount" type="number" min="0" step="0.01" value="${b.amount}" />
         </div>
         <div class="rec-weekly" ${b.recurrence !== 'everyNWeeks' ? 'style="display:none;"' : ''}>
           <label>First / next due date</label>
@@ -4090,7 +4126,7 @@ function openBillEditor(id) {
           <label>Every (weeks)</label>
           <input name="intervalWeeks" type="number" min="1" max="52" value="${b.intervalWeeks || 3}" />
         </div>
-        <div class="rec-weekly" ${b.recurrence !== 'everyNWeeks' ? 'style="display:none;"' : ''}>
+        <div class="rec-weekly amt-fixed" ${b.recurrence !== 'everyNWeeks' ? 'style="display:none;"' : ''}>
           <label>Amount (per occurrence)</label>
           <input name="amountWeekly" type="number" min="0" step="0.01" value="${b.amount}" />
         </div>
@@ -4102,9 +4138,35 @@ function openBillEditor(id) {
           <label>Every (months)</label>
           <input name="intervalMonths" type="number" min="1" max="60" value="${b.intervalMonths || 6}" />
         </div>
-        <div class="rec-monthN" ${b.recurrence !== 'everyNMonths' ? 'style="display:none;"' : ''}>
+        <div class="rec-monthN amt-fixed" ${b.recurrence !== 'everyNMonths' ? 'style="display:none;"' : ''}>
           <label>Amount (per occurrence)</label>
           <input name="amountMonthN" type="number" min="0" step="0.01" value="${b.amount}" />
+        </div>
+        <div class="full">
+          <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ink);">
+            <input name="variable" type="checkbox" ${b.variable ? 'checked' : ''} style="width:auto; margin:0;" />
+            Variable amount — estimate a range
+          </label>
+          <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;">For bills that move month to month, like electric or water.</div>
+        </div>
+        <div class="amt-variable">
+          <label>Typical low</label>
+          <input name="amountMin" type="number" min="0" step="0.01" value="${b.amountMin ?? b.amount ?? 0}" />
+        </div>
+        <div class="amt-variable">
+          <label>Typical high</label>
+          <input name="amountMax" type="number" min="0" step="0.01" value="${b.amountMax ?? b.amount ?? 0}" />
+        </div>
+        <div class="full amt-variable">
+          <label>Set aside using</label>
+          <select name="planAt">
+            ${[
+              ['max', 'The high end — safest'],
+              ['mid', 'The midpoint'],
+              ['min', 'The low end']
+            ].map(([v, l]) => `<option value="${v}" ${(b.planAt || 'max') === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+          <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:4px;" id="plan-hint"></div>
         </div>
         <div>
           <label>Already saved</label>
@@ -4148,12 +4210,31 @@ function openBillEditor(id) {
       const preview = el.querySelector('#preview');
       const syncRecurrenceUI = () => {
         const rec = form.recurrence.value;
-        el.querySelectorAll('.rec-monthly').forEach((n) => n.style.display = rec === 'monthly' ? '' : 'none');
-        el.querySelectorAll('.rec-weekly').forEach((n) => n.style.display = rec === 'everyNWeeks' ? '' : 'none');
-        el.querySelectorAll('.rec-monthN').forEach((n) => n.style.display = rec === 'everyNMonths' ? '' : 'none');
+        const variable = form.variable.checked;
+        const show = (n, on) => n.style.display = on ? '' : 'none';
+        // A fixed-amount field only shows when it matches the recurrence AND
+        // the bill isn't variable — otherwise there'd be two amounts on screen
+        // disagreeing with each other.
+        el.querySelectorAll('.rec-monthly').forEach((n) => show(n, rec === 'monthly' && !(variable && n.classList.contains('amt-fixed'))));
+        el.querySelectorAll('.rec-weekly').forEach((n) => show(n, rec === 'everyNWeeks' && !(variable && n.classList.contains('amt-fixed'))));
+        el.querySelectorAll('.rec-monthN').forEach((n) => show(n, rec === 'everyNMonths' && !(variable && n.classList.contains('amt-fixed'))));
+        el.querySelectorAll('.amt-variable').forEach((n) => show(n, variable));
       };
       syncRecurrenceUI();
       form.recurrence.addEventListener('change', () => { syncRecurrenceUI(); renderPreview(); });
+      form.variable.addEventListener('change', () => {
+        // Seed the range from whatever fixed amount was already typed, so
+        // ticking the box doesn't wipe the number the user just entered.
+        if (form.variable.checked) {
+          const cur = parseFloat(form.amount?.value || form.amountWeekly?.value || form.amountMonthN?.value) || 0;
+          if (cur > 0 && !(parseFloat(form.amountMax.value) > 0)) {
+            form.amountMin.value = cur.toFixed(2);
+            form.amountMax.value = cur.toFixed(2);
+          }
+        }
+        syncRecurrenceUI();
+        renderPreview();
+      });
 
       const readDraft = () => {
         const fd = new FormData(form);
@@ -4162,8 +4243,17 @@ function openBillEditor(id) {
         if (rec === 'everyNWeeks') { amount = parseFloat(fd.get('amountWeekly')) || 0; dueAnchor = fd.get('dueAnchor') || b.dueAnchor; }
         else if (rec === 'everyNMonths') { amount = parseFloat(fd.get('amountMonthN')) || 0; dueAnchor = fd.get('dueAnchorM') || b.dueAnchor; }
         else { amount = parseFloat(fd.get('amount')) || 0; }
+        const variable = !!fd.get('variable');
+        const amountMin = Math.max(0, parseFloat(fd.get('amountMin')) || 0);
+        const amountMax = Math.max(amountMin, parseFloat(fd.get('amountMax')) || 0);
+        const planAt = fd.get('planAt') || 'max';
+        if (variable) amount = planAmountFor({ variable, amountMin, amountMax, planAt });
         return {
           ...b,
+          variable,
+          amountMin: variable ? amountMin : undefined,
+          amountMax: variable ? amountMax : undefined,
+          planAt: variable ? planAt : undefined,
           name: fd.get('name') || '(unnamed)',
           recurrence: rec,
           dueDay: clamp(parseInt(fd.get('dueDay'), 10) || 1, 1, 31),
@@ -4179,6 +4269,14 @@ function openBillEditor(id) {
       };
       const renderPreview = () => {
         const draft = readDraft();
+        const planHint = el.querySelector('#plan-hint');
+        if (planHint) {
+          planHint.innerHTML = draft.variable
+            ? (draft.amountMax > draft.amountMin
+                ? `Setting aside <strong>${fmtUSD.format(draft.amount)}</strong> each time, from a range of ${billRangeLabel(draft)}.`
+                : `Setting aside <strong>${fmtUSD.format(draft.amount)}</strong>. Give the high end a larger value to plan for a range.`)
+            : '';
+        }
         const dates = State.paySchedule(4);
         const { perPaycheck } = computeAllocations([draft], dates);
         preview.innerHTML = `
@@ -4760,7 +4858,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v120 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v121 · ledger edition</p>
       </div>
     </div>
 
@@ -4840,6 +4938,7 @@ route('settings', (root) => {
           <li>Tap a bill row to edit it. Tap a category header to collapse / expand.</li>
           <li>Drag the ⋮⋮ handle on a row or header to reorder within a category (or reorder categories).</li>
           <li>Tap the ✕ on a category header to delete the category and all its bills.</li>
+          <li><strong>Variable amount</strong> — tick it on a bill that moves month to month (electric, water) and give a typical low and high. The app still sets aside one number each pay; <em>Set aside using</em> picks which end of the range that is, defaulting to the high end because under-saving is the expensive mistake. The range shows as a badge on the row, and the Monthly total gains a low–high figure so a total built on estimates doesn't read as exact.</li>
           <li><strong>Show archived (N)</strong> reveals archived bills; the number is how many there are. The button only appears when something is actually archived.</li>
           <li>Bills coming due within your due-soon window get a highlight tint + "due in Nd" chip.</li>
           <li><strong>Search</strong> matches bill names and category names. The two dropdowns narrow by category and by payment shape, and they stack with the search box. Collapsed categories open automatically while a filter is active.</li>
