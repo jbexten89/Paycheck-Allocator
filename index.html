@@ -767,6 +767,29 @@
   table.schedule tr.expanded-detail td { background: var(--paper); }
   table.schedule th { background: transparent; font-weight: 500; color: var(--ink-muted); font-size: 12px; letter-spacing: 0.02em; }
   table.schedule th:first-child, table.schedule td:first-child { text-align: left; }
+  /* Phones: the 160px name column plus 88px pay columns left only two pays
+     visible out of a 786px-wide table. Columns are min-widths, not fixed, so
+     a long bill name still expands its own column -- dropping the floors just
+     stops short names reserving space nothing uses. Declared after the base
+     widths above so it wins on source order. */
+  @media (max-width: 768px) {
+    .schedule-wrap table.schedule th, .schedule-wrap table.schedule td { padding-left: 4px; padding-right: 4px; }
+    .schedule-wrap table.schedule th:first-child,
+    .schedule-wrap table.schedule td:first-child { min-width: 0; padding-left: 8px; }
+    .schedule-wrap table.schedule th:not(:first-child):not(:last-child),
+    .schedule-wrap table.schedule td:not(:first-child):not(:last-child) { min-width: 72px; }
+    .schedule-wrap table.schedule th:last-child,
+    .schedule-wrap table.schedule td:last-child { min-width: 76px; padding-right: 8px; }
+    /* ...but cap it too: one long bill name would otherwise widen the sticky
+       column to 218px and push every pay column off a 320px screen. Category
+       header rows are excluded — those carry their own counts and totals. */
+    .schedule-wrap table.schedule tbody tr:not(.sched-cat-header) td:first-child {
+      max-width: 132px; overflow: hidden; text-overflow: ellipsis;
+    }
+  }
+  @media (max-width: 360px) {
+    .schedule-wrap table.schedule tbody tr:not(.sched-cat-header) td:first-child { max-width: 108px; }
+  }
   table.schedule tr.expandable { cursor: pointer; }
   table.schedule tr.expandable:hover { background: var(--paper); }
   table.schedule tr.expanded-detail td { background: var(--paper); font-size: 12px; color: var(--ink-soft); }
@@ -5074,7 +5097,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v126 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v127 · ledger edition</p>
       </div>
     </div>
 
