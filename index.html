@@ -480,6 +480,11 @@
   .bills-total-label { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .bills-total-amount { font-size: 18px; font-weight: 600; color: var(--good); font-variant-numeric: tabular-nums; }
   .bills-total-count { font-size: 12px; color: var(--ink-muted); margin-left: auto; }
+  /* Inline text button that reads as a link */
+  .btn-link {
+    background: none; border: none; padding: 0; cursor: pointer;
+    color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline;
+  }
   /* Collapsible dashboard section headers */
   .dash-sec-head {
     display: flex; align-items: center; gap: 8px;
@@ -4740,7 +4745,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v118 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v119 · ledger edition</p>
       </div>
     </div>
 
@@ -4840,6 +4845,7 @@ route('settings', (root) => {
       </div>
       <div class="card">
         <h2>Sync & backup</h2>
+        <p style="color:var(--ink-soft); font-size:13px;"><strong>Reinstalling or setting up a second device?</strong> Use <em>Sign in</em> on the welcome screen rather than filling the wizard in — that pulls your existing bills down instead of starting a fresh local copy. The welcome screen is skipped automatically when a saved session is found.</p>
         <p style="color:var(--ink-soft);">Sign in with email + password under the <em>Sync</em> tab. Sign-in happens inside the app (works on iOS home-screen installs). Changes push to Supabase automatically after ~1s. Sign in on another device with the same account to pull your data.</p>
         <p style="color:var(--ink-soft); font-size:13px;">Regular <em>Data → Export JSON</em> gives a manual backup file. The Optimize snapshot is local-only (not synced).</p>
         <p style="color:var(--ink-soft); font-size:13px;">A brief <strong>Saved</strong> toast confirms each push. Rapid edits are coalesced into one confirmation, and it stays quiet during What-if mode and on the launch sync. Failures show a longer message naming the error — your data is already on the device either way, and the push retries.</p>
@@ -5145,7 +5151,7 @@ State.load();
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
 });
 Sync.on(() => { const el = document.getElementById('sync-status'); if (el) el.textContent = Sync.status + (Sync.lastError ? ` (${Sync.lastError})` : ''); });
-Sync.init();
+const syncInitDone = Sync.init();
 
 // Flush pending edits when the app is backgrounded or closed. On iOS a PWA can
 // be frozen without firing 'beforeunload', so visibilitychange + pagehide are
@@ -5158,17 +5164,65 @@ window.addEventListener('pagehide', () => { try { Sync.flush(); } catch {} });
 
 navigate();
 
-// First-run wizard (never signed in with sync yet, and never dismissed)
-if (!State.onboarded && !Sync.user) {
-  setTimeout(showOnboarding, 200);
+// First-run wizard (never signed in with sync yet, and never dismissed).
+// Sync.user is only populated after the Supabase SDK loads from a CDN and
+// getSession() resolves, so a fixed short timer races it: on a slow
+// connection a returning user reinstalling the app would be shown the
+// welcome wizard — including "clear all bills" — while their cloud data was
+// still arriving. Wait for sync to settle, with a ceiling so a dead CDN or
+// an offline first run doesn't leave a new user staring at nothing.
+async function maybeShowOnboarding(initPromise, ceilingMs = 3000) {
+  if (State.onboarded) return 'already-onboarded';
+  await Promise.race([
+    Promise.resolve(initPromise).catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, ceilingMs))
+  ]);
+  if (State.onboarded) return 'onboarded-while-waiting';
+  if (Sync.user) return 'signed-in';
+  showOnboarding();
+  return 'shown';
+}
+maybeShowOnboarding(syncInitDone);
+
+// Jump straight to the sign-in form in Settings.
+function goToSync() {
+  try { sessionStorage.setItem('settings.tab', 'sync'); } catch {}
+  location.hash = 'settings';
+  navigate();
+}
+
+// Offered after setup, and only to people with nothing in the cloud yet:
+// localStorage is not durable storage, and losing a hand-entered bill list
+// with no backup is the worst outcome this app has.
+function offerSyncBackup() {
+  if (Sync.user) return;
+  openModal(`
+    <div class="modal-header"><h3>Back up your data?</h3></div>
+    <div class="modal-body">
+      <p style="margin-top:0;">Your bills live only on this device. Clearing your browser data — or iOS reclaiming space from an app you haven't opened in a while — would take them with it.</p>
+      <p style="color:var(--ink-soft); font-size:13px;">Signing in with an email and password keeps a copy in the cloud and lets you pick up on another device. You can do this later from Settings → Sync.</p>
+    </div>
+    <div class="modal-footer">
+      <span class="spacer"></span>
+      <button class="btn" data-x="later">Not now</button>
+      <button class="btn btn-primary" data-x="sync">Set up sync</button>
+    </div>
+  `, {
+    onMount(el, close) {
+      el.querySelector('[data-x="later"]').onclick = close;
+      el.querySelector('[data-x="sync"]').onclick = () => { close(); goToSync(); };
+    }
+  });
 }
 
 function showOnboarding() {
   const today = toISO(new Date());
+  let unsubscribeSync = null;
   openModal(`
     <div class="modal-header"><h3>Welcome</h3><button class="btn btn-ghost" data-x="close" aria-label="Close">✕</button></div>
     <div class="modal-body">
       <p style="color:var(--ink-soft); margin-top:0;">Paycheck Allocator splits each bill across the paychecks that fall before its due date. A few quick answers will make it useful right away.</p>
+      <p style="font-size:13px; margin:-4px 0 14px;">Used this before? <button class="btn-link" type="button" data-x="signin">Sign in</button> to pull your data instead.</p>
       <div class="form-grid">
         <div class="full">
           <label>Paycheck amount (net)</label>
@@ -5204,6 +5258,20 @@ function showOnboarding() {
     </div>
   `, {
     onMount(el, close) {
+      // If sync resolves a session while this is open (slow CDN, or they just
+      // signed in), the wizard is the wrong screen — get out of the way.
+      // Only bail out if a session turns up that wasn't there when we opened.
+      // Settings → "Restart welcome" is a deliberate re-run by someone who may
+      // already be signed in, and must not slam shut on them.
+      const startedSignedOut = !Sync.user;
+      unsubscribeSync = Sync.on(() => {
+        if (startedSignedOut && Sync.user) { try { close(); } catch {} }
+      });
+      el.querySelector('[data-x="signin"]').onclick = () => {
+        State.setOnboarded(true);
+        close();
+        goToSync();
+      };
       el.querySelectorAll('[data-x="close"]').forEach((x) => x.onclick = () => {
         State.setOnboarded(true);
         close();
@@ -5235,7 +5303,12 @@ function showOnboarding() {
         State.setOnboarded(true);
         close();
         navigate();
+        // Ask about a backup only once setup has paid off, never before.
+        setTimeout(offerSyncBackup, 350);
       };
+    },
+    onClose() {
+      if (unsubscribeSync) { try { unsubscribeSync(); } catch {} unsubscribeSync = null; }
     }
   });
 }
