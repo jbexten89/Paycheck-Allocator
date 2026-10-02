@@ -773,6 +773,15 @@
       bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     }
   }
+  /* In What-if mode a centred pill sits above the tab bar. Below ~365px it
+     grows wide enough that the FAB lands on its "Keep" button, so stack the
+     FAB (and any toast) above the pill instead of beside it. */
+  body.whatif-active .fab { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+  body.whatif-active .toast-wrap { bottom: calc(144px + env(safe-area-inset-bottom, 0px)); }
+  @media (max-width: 768px) {
+    body.whatif-active .fab { bottom: calc(126px + env(safe-area-inset-bottom, 0px)); }
+    body.whatif-active .toast-wrap { bottom: calc(194px + env(safe-area-inset-bottom, 0px)); }
+  }
 
   /* Modal */
   .modal-backdrop {
@@ -2286,6 +2295,8 @@ const Sync = {
     } else {
       this.setStatus('signed-out');
     }
+    // Everything from here on is a user-initiated save worth confirming.
+    this.ready = true;
     sb.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session) {
         // supabase-js re-emits SIGNED_IN when it recovers/refreshes the session,
@@ -2329,6 +2340,27 @@ const Sync = {
   // The updated_at of the cloud row this device's data is derived from.
   // A push whose base no longer matches the cloud means another device
   // wrote in between, and blindly upserting would discard their changes.
+  // Sync is otherwise invisible, which makes "did that save?" unanswerable.
+  // Successes are coalesced so a burst of edits yields one confirmation;
+  // failures are louder and longer, since those are the ones worth acting on.
+  ready: false,
+  _lastOkToast: 0,
+  _lastErrToast: 0,
+  notifySaved() {
+    if (!this.ready) return;                               // launch sync isn't a user save
+    if (typeof WhatIf !== 'undefined' && WhatIf.active) return;
+    const now = Date.now();
+    if (now - this._lastOkToast < 5000) return;
+    this._lastOkToast = now;
+    showToast('Saved', { duration: 1600 });
+  },
+  notifyFailed(msg) {
+    const now = Date.now();
+    if (now - this._lastErrToast < 10000) return;
+    this._lastErrToast = now;
+    showToast(`Sync failed — ${escapeHtml(msg || 'unknown error')}. Your data is safe on this device and will retry.`, { duration: 7000 });
+  },
+
   getBase() { try { return localStorage.getItem(STORE.syncBase); } catch { return null; } },
   setBase(v) { try { v ? localStorage.setItem(STORE.syncBase, v) : localStorage.removeItem(STORE.syncBase); } catch {} },
 
@@ -2348,13 +2380,20 @@ const Sync = {
       } else {
         await this._pushNow();
       }
-    } catch (e) { this.setStatus('error', e.message); }
+    } catch (e) { this.setStatus('error', e.message); this.notifyFailed(e.message); }
   },
   push() {
     if (typeof WhatIf !== 'undefined' && WhatIf.active) return;
     if (!ensureSb() || !this.user) return;
     this.markDirty();
-    if (!navigator.onLine) { this.setStatus('offline'); return; }
+    if (!navigator.onLine) {
+      this.setStatus('offline');
+      if (this.ready && Date.now() - this._lastErrToast > 10000) {
+        this._lastErrToast = Date.now();
+        showToast('Offline — saved on this device, will sync when you reconnect.', { duration: 5000 });
+      }
+      return;
+    }
     clearTimeout(this.pushTimer);
     this.pushTimer = setTimeout(() => this._pushNow(), 800);
   },
@@ -2396,7 +2435,8 @@ const Sync = {
       this.setBase(stamp);
       this.clearDirty();
       this.setStatus('synced');
-    } catch (e) { this.setStatus('error', e.message); }
+      this.notifySaved();
+    } catch (e) { this.setStatus('error', e.message); this.notifyFailed(e.message); }
   },
   // Overwrite the cloud with this device's data, ignoring the newer row.
   async forcePush() { await this._pushNow({ force: true }); },
@@ -2636,6 +2676,8 @@ function wireDashSections(root, rerender) {
 // destructive commit belongs.
 function showToast(message, opts = {}) {
   const { actionLabel = null, onAction = null, onExpire = null, duration = 10000 } = opts;
+  // A short, actionless toast is gone before a ✕ is worth aiming at.
+  const closable = opts.closable ?? !(duration <= 2500 && !actionLabel);
   let wrap = document.querySelector('.toast-wrap');
   if (!wrap) {
     wrap = document.createElement('div');
@@ -2648,7 +2690,7 @@ function showToast(message, opts = {}) {
   el.innerHTML = `
     <span class="toast-msg">${message}</span>
     ${actionLabel ? `<button class="toast-action" type="button">${escapeHtml(actionLabel)}</button>` : ''}
-    <button class="toast-close" type="button" aria-label="Dismiss">✕</button>
+    ${closable ? '<button class="toast-close" type="button" aria-label="Dismiss">✕</button>' : ''}
   `;
   wrap.appendChild(el);
 
@@ -2674,7 +2716,8 @@ function showToast(message, opts = {}) {
     remove();
     if (onAction) onAction();
   };
-  el.querySelector('.toast-close').onclick = () => dismiss(false);
+  const closeBtn = el.querySelector('.toast-close');
+  if (closeBtn) closeBtn.onclick = () => dismiss(false);
   return { dismiss: () => dismiss(false) };
 }
 
@@ -4697,7 +4740,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v117 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v118 · ledger edition</p>
       </div>
     </div>
 
@@ -4799,6 +4842,7 @@ route('settings', (root) => {
         <h2>Sync & backup</h2>
         <p style="color:var(--ink-soft);">Sign in with email + password under the <em>Sync</em> tab. Sign-in happens inside the app (works on iOS home-screen installs). Changes push to Supabase automatically after ~1s. Sign in on another device with the same account to pull your data.</p>
         <p style="color:var(--ink-soft); font-size:13px;">Regular <em>Data → Export JSON</em> gives a manual backup file. The Optimize snapshot is local-only (not synced).</p>
+        <p style="color:var(--ink-soft); font-size:13px;">A brief <strong>Saved</strong> toast confirms each push. Rapid edits are coalesced into one confirmation, and it stays quiet during What-if mode and on the launch sync. Failures show a longer message naming the error — your data is already on the device either way, and the push retries.</p>
         <p style="color:var(--ink-soft); font-size:13px;"><strong>Sync conflicts.</strong> Your data saves as a single blob, so two devices editing between syncs can't be merged. If another device saved after the copy this device started from, the push stops and asks: <em>Keep this device</em> overwrites the cloud with what's on screen, <em>Use other device</em> replaces this device with the cloud copy. Nothing is overwritten until you choose, and dismissing the prompt just retries later.</p>
       </div>
       <div class="card">
