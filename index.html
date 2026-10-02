@@ -623,6 +623,17 @@
     border-top-right-radius: 0;
   }
   .cat-header { touch-action: pan-y; }
+  /* Touch devices get ~44px rows and fatter handles. Keyed off pointer type
+     rather than width, so the dense desktop layout stays as-is. Must sit after
+     the base .bill-row / .cat-header / .cat-delete rules to win on source order. */
+  @media (pointer: coarse) {
+    .bill-row { min-height: 44px; padding: 9px 12px; }
+    .bill-row .drag-handle { padding: 12px 10px; margin: -12px -4px -12px 0; }
+    .cat-header { padding: 12px; min-height: 44px; align-items: center; }
+    .cat-header .drag-handle { padding: 11px 8px; margin: -11px 0; }
+    .cat-delete { padding: 15px 14px; margin: -15px -8px -15px 0; }
+    #toggle-archived { white-space: nowrap; }
+  }
   .cat-header:hover { border-color: var(--hairline-strong); }
   .cat-header.reorder-source { opacity: 0.3; }
   .cat-header.drag-over-top { box-shadow: inset 0 3px 0 var(--accent); }
@@ -3623,6 +3634,7 @@ async function runOptimizeShapes() {
 
 route('bills', (root) => {
   const showArchNow = sessionStorage.getItem('bills.showArch') === '1';
+  const archivedCount = State.bills.filter((b) => b.archived).length;
   const activeForTotal = State.bills.filter((b) => !b.archived && Number(b.amount) > 0);
   const monthlyTotal = activeForTotal.reduce((s, b) => s + monthlyEquivFor(b), 0);
   const billCount = activeForTotal.length;
@@ -3634,7 +3646,13 @@ route('bills', (root) => {
         <div class="sub">Your recurring monthly obligations.</div>
       </div>
       <div class="row" style="gap:8px;">
-        <button class="btn" id="toggle-archived">${showArchNow ? 'Hide archived' : 'Show archived'}</button>
+        ${
+          // Nothing archived means the toggle does nothing — hide it rather
+          // than offering a control that can't change what's on screen.
+          archivedCount > 0
+            ? `<button class="btn" id="toggle-archived">${showArchNow ? 'Hide' : 'Show'} archived (${archivedCount})</button>`
+            : ''
+        }
       </div>
     </div>
     <div class="bills-total-bar">
@@ -4679,7 +4697,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v116 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v117 · ledger edition</p>
       </div>
     </div>
 
@@ -4759,7 +4777,7 @@ route('settings', (root) => {
           <li>Tap a bill row to edit it. Tap a category header to collapse / expand.</li>
           <li>Drag the ⋮⋮ handle on a row or header to reorder within a category (or reorder categories).</li>
           <li>Tap the ✕ on a category header to delete the category and all its bills.</li>
-          <li>Use <strong>Show archived</strong> to see bills you've archived.</li>
+          <li><strong>Show archived (N)</strong> reveals archived bills; the number is how many there are. The button only appears when something is actually archived.</li>
           <li>Bills coming due within your due-soon window get a highlight tint + "due in Nd" chip.</li>
           <li><strong>Search</strong> matches bill names and category names. The two dropdowns narrow by category and by payment shape, and they stack with the search box. Collapsed categories open automatically while a filter is active.</li>
           <li>Deleting a bill happens immediately with a 10-second <strong>Undo</strong>; deleting a whole category still asks first, then also offers Undo. Undo puts rows back in their original order.</li>
