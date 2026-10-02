@@ -286,15 +286,27 @@
   .whatif-banner .whatif-dot { width: 8px; height: 8px; border-radius: 50%; background: #8B5CF6; box-shadow: 0 0 8px #8B5CF6; flex-shrink: 0; }
   .whatif-banner .whatif-msg { flex: 0 1 auto; min-width: 0; }
   .whatif-banner .whatif-spacer { flex: 1; }
+  /* .btn is a flex container, and flex items are blockified -- a span placed
+     directly inside one can't stay inline. The button's label is therefore
+     wrapped in its own span so the hideable fragment sits in normal flow. */
   .whatif-banner .btn { padding: 4px 10px !important; font-size: 12px !important; }
   body.whatif-active {
     background: linear-gradient(180deg, rgba(139, 92, 246, 0.16) 0%, rgba(139, 92, 246, 0.10) 100%), var(--paper) !important;
   }
   body.whatif-active .view { outline: 1px dashed rgba(139, 92, 246, 0.35); outline-offset: -4px; border-radius: 12px; }
   html.whatif-active { background: rgba(139, 92, 246, 0.10); }
+  /* Phones: drop the explanatory half of the sentence and keep the banner on
+     one row. Wrapping it to two rows made the banner ~100px tall before the
+     Dashboard even started, on the screen that most needs the space. */
   @media (max-width: 640px) {
-    .whatif-banner { flex-wrap: wrap; }
-    .whatif-banner .whatif-msg { flex-basis: 100%; }
+    .whatif-banner {
+      padding: 7px 10px;
+      margin: 2px 16px 10px 16px;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .whatif-banner .whatif-long { display: none; }
+    .whatif-banner .btn { padding: 4px 9px !important; font-size: 12px !important; }
   }
 
   /* Cards */
@@ -2666,10 +2678,10 @@ function navigate() {
     banner.className = 'whatif-banner';
     banner.innerHTML = `
       <span class="whatif-dot"></span>
-      <span class="whatif-msg"><b>What-if mode</b> — changes are not saved or synced</span>
+      <span class="whatif-msg"><b>What-if mode</b><span class="whatif-long"> — changes are not saved or synced</span></span>
       <span class="whatif-spacer"></span>
       <button class="btn" id="whatif-discard">Discard</button>
-      <button class="btn btn-primary" id="whatif-apply">Keep changes</button>
+      <button class="btn btn-primary" id="whatif-apply"><span>Keep<span class="whatif-long"> changes</span></span></button>
     `;
     main.appendChild(banner);
     banner.querySelector('#whatif-discard').onclick = () => { WhatIf.discard(); navigate(); };
@@ -5053,7 +5065,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v124 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v125 · ledger edition</p>
       </div>
     </div>
 
