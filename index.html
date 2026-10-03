@@ -1313,11 +1313,31 @@ function batchMonthlyRateCats(perPaycheck, bills, catSet, billIdSet) {
     const k = p.payDate.getFullYear() + '-' + p.payDate.getMonth();
     if (!firstByMonth.has(k)) firstByMonth.set(k, i);
   });
+  // This function discards the items the main loop built — which already had
+  // the Cell credit deducted — and recomputes from bill.amount, so the credit
+  // has to be re-applied here or a monthly-rate Cell bill ignores it entirely.
+  // Keyed by the deposit's pay month, matching the dueDate these items carry
+  // (and therefore the key the Dashboard's credit input reads and writes).
+  const cellBill = (typeof State !== 'undefined' && State.cellCreditEnabled)
+    ? targeted.find((b) => (b.name || '').trim().toLowerCase() === 'cell')
+    : null;
+  let cellCarry = 0;
   for (const idx of firstByMonth.values()) {
     const p = perPaycheck[idx];
     for (const b of targeted) {
-      const amt = monthlyRate(b);
-      if (amt <= 0) continue;
+      const rate = monthlyRate(b);
+      let amt = rate;
+      const isCell = cellBill && b.id === cellBill.id;
+      if (isCell) {
+        const k = p.payDate.getFullYear() + '-' + String(p.payDate.getMonth() + 1).padStart(2, '0');
+        const raw = Math.max(0, Number((State.cellCredits || {})[k] || 0));
+        const avail = raw + cellCarry;
+        amt = Math.max(0, rate - Math.min(avail, rate));
+        cellCarry = Math.max(0, avail - rate);   // overflow rolls to next month
+      }
+      // A credit that wipes the bill still needs its row, or the input used to
+      // edit that credit disappears from the Dashboard.
+      if (amt <= 0 && !(isCell && rate > 0)) continue;
       p.items.push({ billId: b.id, name: b.name, color: b.color, amount: amt, dueDate: p.payDate, paychecksInCycle: 1 });
       p.total += amt;
     }
@@ -5169,7 +5189,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v130 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v131 · ledger edition</p>
       </div>
     </div>
 
