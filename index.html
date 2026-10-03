@@ -422,6 +422,13 @@
     -webkit-text-fill-color: var(--good) !important; /* iOS WebKit overrides color; must set fill too */
     font-weight: 600 !important;
   }
+  /* Green = calculated, white = a value you set by hand. Without this a pinned
+     amount is indistinguishable from a computed one, which is how a stale
+     override masking a Cell credit went unnoticed. */
+  .flex-amt-input.flex-edited {
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
+  }
   .cell-credit-input {
     display: inline-block !important;
     width: 70px !important;
@@ -1987,7 +1994,9 @@ const State = {
   isInlineEditCat(cat) { return this.inlineEditCats.has((cat || '').toLowerCase()); },
   setFlexOverride(billId, payDateISO, amount) {
     if (!billId || !payDateISO) return;
-    const val = Number(amount);
+    // Number(null) is 0, which would pin the row at zero instead of clearing
+    // it — callers pass null to mean "remove this override".
+    const val = (amount === null || amount === undefined || amount === '') ? NaN : Number(amount);
     const map = this.flexOverrides[billId] || {};
     if (!isFinite(val) || val < 0) {
       delete map[payDateISO];
@@ -2031,6 +2040,37 @@ const State = {
     if (v > 0) this.cellCredits[monthKey] = v;
     else delete this.cellCredits[monthKey];
     localStorage.setItem(STORE.cellCredits, JSON.stringify(this.cellCredits));
+    // Flex overrides are applied after the credit, so a pinned amount left
+    // from an earlier edit would silently swallow this one. Entering a credit
+    // is the newer, more specific statement, so the stale pin goes.
+    this.clearCellOverridesForMonth(monthKey);
+  },
+  // Drop any inline-edit override on the Cell bill for pays funding monthKey.
+  clearCellOverridesForMonth(monthKey) {
+    const cell = (this.bills || []).find((b) => (b.name || '').trim().toLowerCase() === 'cell');
+    if (!cell || !this.flexOverrides || !this.flexOverrides[cell.id]) return 0;
+    const map = this.flexOverrides[cell.id];
+    let removed = 0;
+    for (const iso of Object.keys(map)) {
+      try {
+        const { D } = nextDueCycleFor(cell, parseISO(iso));
+        const k = D.getFullYear() + '-' + String(D.getMonth() + 1).padStart(2, '0');
+        if (k === monthKey) { delete map[iso]; removed++; }
+      } catch {}
+    }
+    if (!removed) return 0;
+    if (!Object.keys(map).length) delete this.flexOverrides[cell.id];
+    localStorage.setItem(STORE.flexOverrides, JSON.stringify(this.flexOverrides));
+    return removed;
+  },
+  // One-off cleanup for data already in this broken state: an override that
+  // predates this fix is masking a credit the user can see on screen.
+  pruneCellOverridesMaskingCredits() {
+    let removed = 0;
+    for (const [k, v] of Object.entries(this.cellCredits || {})) {
+      if (Number(v) > 0) removed += this.clearCellOverridesForMonth(k);
+    }
+    return removed;
   },
   setLeftoverMonths(n) { this.leftoverMonths = n; localStorage.setItem(STORE.leftoverMonths, String(n)); },
   toggleBatchMonthlyCat(cat, on) {
@@ -3282,7 +3322,12 @@ route('dashboard', (root) => {
                       amount: it.amount || 0,
                       category: catFor(b),
                       payIdxInCycle: it.payIdxInCycle,
-                      paychecksInCycle: it.paychecksInCycle
+                      paychecksInCycle: it.paychecksInCycle,
+                      // Rebuilding the row here drops fields the allocator set;
+                      // overridden drives the manual-vs-calculated styling.
+                      overridden: it.overridden,
+                      runningBalance: it.runningBalance,
+                      goalTarget: it.goalTarget
                     };
                   });
                   // Also include any virtual items that aren't real bills (e.g. sinking-fund goals)
@@ -3307,6 +3352,7 @@ route('dashboard', (root) => {
                     payIdxInCycle: it.payIdxInCycle,
                     paychecksInCycle: it.paychecksInCycle,
                     isGoal: it.isGoal,
+                    overridden: it.overridden,
                     runningBalance: it.runningBalance,
                     goalTarget: it.goalTarget
                   }));
@@ -3365,7 +3411,7 @@ route('dashboard', (root) => {
                     const editable = next && billObj && State.isInlineEditCat(catKey);
                     let allocateCell;
                     if (editable) {
-                      allocateCell = `<td class="total"><input class="flex-amt-input" type="text" inputmode="numeric" autocomplete="off" value="${(it.amount || 0).toFixed(2)}" data-bill="${escapeAttr(it.billId)}" data-pay="${toISO(next.payDate)}" /></td>`;
+                      allocateCell = `<td class="total"><input class="flex-amt-input${it.overridden ? ' flex-edited' : ''}" type="text" inputmode="numeric" autocomplete="off" value="${(it.amount || 0).toFixed(2)}" data-bill="${escapeAttr(it.billId)}" data-pay="${toISO(next.payDate)}" title="${it.overridden ? 'Manually set — overrides the calculated amount' : 'Calculated'}" /></td>`;
                     } else if (it.isGoal && typeof it.runningBalance === 'number' && it.goalTarget > 0) {
                       allocateCell = `<td class="total">${fmtUSD.format(it.amount)}<div class="hint" style="font-size:10px; color:var(--ink-muted); font-weight:400; margin-top:2px;">${fmtUSD.format(it.runningBalance)} / ${fmtUSD.format(it.goalTarget)}</div></td>`;
                     } else {
@@ -5123,7 +5169,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v129 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v130 · ledger edition</p>
       </div>
     </div>
 
@@ -5242,7 +5288,8 @@ route('settings', (root) => {
         <h2>Tips</h2>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
           <li>Set <strong>Show $0 bills on dashboard (grayed)</strong> to see the full bill list even when nothing's allocated that pay.</li>
-          <li>Use per-month <strong>Cell credit</strong> on the Dashboard to reduce Cell's amount for a specific month (e.g. autopay discount); overflow rolls to next month.</li>
+          <li>Use per-month <strong>Cell credit</strong> on the Dashboard to reduce Cell's amount for a specific month (e.g. autopay discount); overflow rolls to next month. The credit comes off the <em>bill</em>, so a $112.28 bill with a $58.32 credit allocates $53.96 across that cycle.</li>
+          <li>In an inline-edit category, an Allocate value you typed yourself shows in <strong>white</strong>; a calculated one shows in <strong>green</strong>. A typed value overrides the calculation, so entering a Cell credit clears any typed amount for that month — otherwise the credit would have nothing to do.</li>
           <li>Schedule view size: 6 / 12 / 18 / 26 pay periods.</li>
           <li>Reset category drag-order with <em>Data → Reset category order</em>.</li>
           <li>Add more income sources any time — the timeline recomputes automatically.</li>
@@ -5553,6 +5600,9 @@ window.addEventListener('pointerup', () => setTimeout(() => {
 }, 50));
 
 State.load();
+// Clears inline-edit overrides that were silently cancelling out an entered
+// Cell credit. A no-op once the data is clean.
+try { State.pruneCellOverridesMaskingCredits(); } catch {}
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
 ['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled','saveSinkingFund','updateSinkingFund'].forEach((k) => {
