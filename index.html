@@ -5189,7 +5189,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v131 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v132 · ledger edition</p>
       </div>
     </div>
 
@@ -5548,7 +5548,15 @@ route('settings', (root) => {
   if (syncNowBtn) syncNowBtn.onclick = () => Sync._pushNow();
 
   $('#export').onclick = () => {
-    const blob = new Blob([JSON.stringify({ bills: State.bills, payStart: State.payStart, frequency: State.frequency }, null, 2)], { type: 'application/json' });
+    // Export the same payload sync uses. It previously wrote only bills,
+    // payStart and frequency, so a file billed as a backup silently omitted
+    // incomes, category shapes, cell credits, overrides, the sinking fund and
+    // every rule — restoring from it would have lost all of that.
+    let payload;
+    try { payload = Sync.payloadFromState(); }
+    catch { payload = { bills: State.bills, payStart: State.payStart, frequency: State.frequency }; }
+    payload.exportedAt = new Date().toISOString();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `paycheck-allocator-${toISO(new Date())}.json`;
@@ -5562,11 +5570,21 @@ route('settings', (root) => {
         const data = JSON.parse(reader.result);
         const bills = Array.isArray(data) ? data : data.bills;
         if (!Array.isArray(bills)) throw new Error('Invalid file');
-        confirmDialog(`Import ${bills.length} bills? This replaces your current bills.`, () => {
-          State.bills = bills.map((b) => ({ ...b, id: b.id || crypto.randomUUID() }));
-          State.saveBills();
-          if (data.payStart) State.setPayStart(data.payStart);
-          if (data.frequency) State.setFrequency(data.frequency);
+        // A full payload (new exports, or a sync blob) restores settings too;
+        // a bare {bills:[...]} from an older export still works.
+        const isFullPayload = !Array.isArray(data) && (data.incomes || data.catShape || data.cellCredits);
+        const what = isFullPayload
+          ? `Import ${bills.length} bills <em>and your settings</em>? This replaces what's on this device.`
+          : `Import ${bills.length} bills? This replaces your current bills.`;
+        confirmDialog(what, () => {
+          if (isFullPayload) {
+            Sync.applyPayload(data);
+          } else {
+            State.bills = bills.map((b) => ({ ...b, id: b.id || crypto.randomUUID() }));
+            State.saveBills();
+            if (data.payStart) State.setPayStart(data.payStart);
+            if (data.frequency) State.setFrequency(data.frequency);
+          }
           navigate();
         });
       } catch (err) { alert('Import failed: ' + err.message); }
