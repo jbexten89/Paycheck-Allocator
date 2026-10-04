@@ -3410,7 +3410,10 @@ route('dashboard', (root) => {
                     if (isCell && it.dueDate) {
                       const mKey = it.dueDate.getFullYear() + '-' + String(it.dueDate.getMonth() + 1).padStart(2, '0');
                       const cred = (State.cellCredits || {})[mKey] || '';
-                      cellExtra = ` <input class="cell-credit-input" type="text" inputmode="numeric" autocomplete="off" placeholder="credit" value="${cred}" data-mkey="${mKey}" />`;
+                      // The credit applies to the cycle this row funds, which
+                      // isn't always the month you're looking at — name it.
+                      const mLabel = it.dueDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                      cellExtra = ` <input class="cell-credit-input" type="text" inputmode="numeric" autocomplete="off" placeholder="credit" value="${cred}" data-mkey="${mKey}" title="Cell credit for ${mLabel}" aria-label="Cell credit for ${mLabel}" />`;
                     }
                     const billObj = State.bills.find((x) => x.id === it.billId);
                     let dueInfo = null;
@@ -3511,11 +3514,25 @@ route('dashboard', (root) => {
       try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch {}
     });
   };
+  // These inputs used to persist only on 'change', which needs a blur. Typing
+  // a value and then scrolling, screenshotting or switching apps left it on
+  // screen but unsaved — it looked entered and wasn't. Persist after a pause
+  // in typing too, without re-rendering (that would steal focus mid-edit).
+  const commitWhileTyping = (inp, save) => {
+    let timer = null;
+    inp.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { try { save(); } catch {} }, 600);
+    });
+    inp.addEventListener('blur', () => clearTimeout(timer));
+  };
   root.querySelectorAll('.cell-credit-input').forEach((inp) => {
     selectAllOnFocus(inp);
     attachImpliedDecimal(inp);
+    const save = () => State.setCellCredit(inp.dataset.mkey, parseFloat(inp.value) || 0);
+    commitWhileTyping(inp, save);
     inp.addEventListener('change', () => {
-      State.setCellCredit(inp.dataset.mkey, parseFloat(inp.value) || 0);
+      save();
       const y = window.scrollY;
       navigate();
       requestAnimationFrame(() => window.scrollTo(0, y));
@@ -3524,9 +3541,13 @@ route('dashboard', (root) => {
   root.querySelectorAll('.flex-amt-input').forEach((inp) => {
     selectAllOnFocus(inp);
     attachImpliedDecimal(inp);
-    inp.addEventListener('change', () => {
+    const save = () => {
       State.setFlexOverride(inp.dataset.bill, inp.dataset.pay, parseFloat(inp.value));
       try { Sync.push(); } catch {}
+    };
+    commitWhileTyping(inp, save);
+    inp.addEventListener('change', () => {
+      save();
       const y = window.scrollY;
       navigate();
       requestAnimationFrame(() => window.scrollTo(0, y));
@@ -5189,7 +5210,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v132 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v133 · ledger edition</p>
       </div>
     </div>
 
