@@ -2916,7 +2916,17 @@ function wireDashSections(root, rerender) {
   });
 }
 
+// Edits typed into inline inputs are committed on a short debounce. If the app
+// is backgrounded before that fires, the timer never runs — iOS freezes the
+// page — so the same hooks that flush a pending sync also flush these.
+const pendingInputCommits = new Set();
+function flushPendingInputCommits() {
+  for (const commit of [...pendingInputCommits]) { try { commit(); } catch {} }
+  pendingInputCommits.clear();
+}
+
 /* ------------------------- Toasts ------------------------- */
+
 // Transient bottom-center message, optionally with a single action (Undo).
 // Dismissing by timeout or ✕ runs onExpire, which is where a deferred
 // destructive commit belongs.
@@ -3520,11 +3530,21 @@ route('dashboard', (root) => {
   // in typing too, without re-rendering (that would steal focus mid-edit).
   const commitWhileTyping = (inp, save) => {
     let timer = null;
+    const commit = () => {
+      clearTimeout(timer);
+      timer = null;
+      pendingInputCommits.delete(commit);
+      try { save(); } catch {}
+    };
     inp.addEventListener('input', () => {
       clearTimeout(timer);
-      timer = setTimeout(() => { try { save(); } catch {} }, 600);
+      pendingInputCommits.add(commit);
+      timer = setTimeout(commit, 600);
     });
-    inp.addEventListener('blur', () => clearTimeout(timer));
+    // Blur must COMMIT, not cancel. 'change' only fires when the value differs
+    // from focus time and never fires at all if a re-render pulls the focused
+    // input out of the DOM, so discarding here silently dropped the edit.
+    inp.addEventListener('blur', commit);
   };
   root.querySelectorAll('.cell-credit-input').forEach((inp) => {
     selectAllOnFocus(inp);
@@ -5210,7 +5230,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v133 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v134 · ledger edition</p>
       </div>
     </div>
 
@@ -5677,9 +5697,15 @@ const syncInitDone = Sync.init();
 // the reliable hooks — without these an edit made in the last 800ms is stranded
 // locally and gets clobbered by the next launch's pull.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') { try { Sync.flush(); } catch {} }
+  if (document.visibilityState === 'hidden') {
+    try { flushPendingInputCommits(); } catch {}
+    try { Sync.flush(); } catch {}
+  }
 });
-window.addEventListener('pagehide', () => { try { Sync.flush(); } catch {} });
+window.addEventListener('pagehide', () => {
+  try { flushPendingInputCommits(); } catch {}
+  try { Sync.flush(); } catch {}
+});
 
 navigate();
 
