@@ -997,6 +997,17 @@
   .report-toolbar select { width: auto; min-width: 104px; }
   .report-toolbar .spacer { flex: 1; min-width: 0; }
   .report-opts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  /* Actions wrap as one group, so revealing "Open in browser" can't strand the
+     close button alone on a second row. */
+  .report-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+  /* .btn sets display, which beats the [hidden] UA rule — restore it. */
+  .report-toolbar [hidden] { display: none !important; }
+  .report-notice {
+    padding: 8px 12px; font-size: 12px; line-height: 1.5;
+    background: var(--panel); color: var(--ink-soft);
+    border-bottom: 1px solid var(--hairline); border-left: 3px solid var(--warn);
+  }
+  .report-notice[hidden] { display: none; }
 
   .report-page {
     background: #fff; color: #171A22; margin: 16px auto 40px;
@@ -5342,7 +5353,7 @@ route('settings', (root) => {
       <div class="card">
         <h2>About</h2>
         <p style="color:var(--ink-soft);">Paycheck Allocator divides each monthly bill across the paychecks that fall before its due date — a paycheck on the due date can't fund that month, so it allocates to the next cycle.</p>
-        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v144 · ledger edition</p>
+        <p class="mono" style="font-size:12px;color:var(--ink-muted);">build v145 · ledger edition</p>
       </div>
     </div>
 
@@ -6189,7 +6200,7 @@ function buildReportHtml(opts) {
       ${appendix}
 
       <div class="report-foot">
-        Paycheck Allocator · build v144 · Amounts are planned set-asides, not payments made.
+        Paycheck Allocator · build v145 · Amounts are planned set-asides, not payments made.
       </div>
     </div>`;
 }
@@ -6228,13 +6239,16 @@ function openReportDialog() {
         <label><input type="checkbox" id="rep-zeros" ${o.zeros ? 'checked' : ''}/> Unfunded bills</label>
       </div>
       <span class="spacer"></span>
-      ${standalone ? '<button class="btn" id="rep-open">Open in browser</button>' : ''}
-      <button class="btn btn-primary" id="rep-print">${standalone ? 'Try print' : 'Save as PDF'}</button>
-      <button class="btn btn-ghost" id="rep-close" aria-label="Close report">✕</button>
+      <div class="report-actions">
+        <button class="btn" id="rep-open" ${standalone ? '' : 'hidden'}>Open in browser</button>
+        <button class="btn btn-primary" id="rep-print">Save as PDF</button>
+        <button class="btn btn-ghost" id="rep-close" aria-label="Close report">✕</button>
+      </div>
     </div>
-    ${standalone ? `<div class="report-meta" style="padding:6px 12px; background:var(--panel); border-bottom:1px solid var(--hairline); color:var(--ink-muted);">
-      From the home-screen app, printing can be blocked. If nothing happens, tap <strong>Open in browser</strong>, then Share → Print → pinch out → Share → Save to Files.
-    </div>` : ''}
+    <div class="report-notice" id="rep-notice" hidden>
+      This window wouldn't open the print dialog. Tap <strong>Open in browser</strong> above, then
+      Share → Print → pinch out on the preview → Share → Save to Files.
+    </div>
     <div id="rep-body"></div>
   `;
 
@@ -6264,9 +6278,40 @@ function openReportDialog() {
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
   root.querySelector('#rep-close').onclick = close;
-  root.querySelector('#rep-print').onclick = () => { try { window.print(); } catch {} };
-
   const openBtn = root.querySelector('#rep-open');
+  const notice = root.querySelector('#rep-notice');
+
+  // iOS home-screen apps often swallow window.print() — no dialog, no error.
+  // Rather than hedge in the button label, call it and watch for proof that a
+  // dialog actually opened; if none arrives, say so and point at the fallback.
+  //
+  // Two detectors because no single one covers every browser: Safari has never
+  // fired beforeprint reliably but does flip the 'print' media query, and some
+  // browsers block inside print() until the dialog is dismissed, which is
+  // itself proof it worked even when neither signal fires.
+  root.querySelector('#rep-print').onclick = () => {
+    let opened = false;
+    const mark = () => { opened = true; };
+    const mq = window.matchMedia ? window.matchMedia('print') : null;
+    const onMq = (e) => { if (e.matches) mark(); };
+    window.addEventListener('beforeprint', mark);
+    if (mq && mq.addEventListener) mq.addEventListener('change', onMq);
+
+    notice.hidden = true;
+    const t0 = performance.now();
+    try { window.print(); } catch {}
+    if (performance.now() - t0 > 300) mark();
+
+    setTimeout(() => {
+      window.removeEventListener('beforeprint', mark);
+      if (mq && mq.removeEventListener) mq.removeEventListener('change', onMq);
+      if (opened) return;
+      notice.hidden = false;
+      openBtn.hidden = false;
+      openBtn.classList.add('btn-primary');
+    }, 450);
+  };
+
   if (openBtn) {
     openBtn.onclick = () => {
       // Self-contained copy: the app's whole stylesheet rides along, so the
