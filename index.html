@@ -1178,6 +1178,7 @@ const STORE = {
   catShapePrevAt: 'paycheck_allocator.cat_shape_prev_at',
   roundSetAside: 'paycheck_allocator.round_set_aside',
   optimizeShapes: 'paycheck_allocator.optimize_shapes',
+  optimizeObjective: 'paycheck_allocator.optimize_objective',
   flexOverrides: 'paycheck_allocator.flex_overrides',
   flexEditEnabled: 'paycheck_allocator.flex_edit_enabled',
   inlineEditCats: 'paycheck_allocator.inline_edit_cats',
@@ -1996,6 +1997,10 @@ const State = {
       const raw = JSON.parse(localStorage.getItem(STORE.optimizeShapes) || 'null');
       this.optimizeShapes = new Set(Array.isArray(raw) ? raw : DEFAULT_OPT_SHAPES);
     } catch { this.optimizeShapes = new Set(DEFAULT_OPT_SHAPES); }
+    // What Optimize is aiming for. 'floor' lifts the worst paycheck (the old
+    // behaviour, where evenness was only ever a third tiebreaker and so almost
+    // never decided anything); 'balance' evens the paychecks out instead.
+    this.optimizeObjective = localStorage.getItem(STORE.optimizeObjective) === 'balance' ? 'balance' : 'floor';
     // paidCycles removed — was surface without enough value; keep localStorage tidy.
     try { localStorage.removeItem('paycheck_allocator.paid_cycles'); } catch {}
     this.flexEditEnabled = localStorage.getItem(STORE.flexEditEnabled) !== '0';
@@ -2176,6 +2181,10 @@ const State = {
     // Spread is the fallback — never let the set become empty
     if (this.optimizeShapes.size === 0) this.optimizeShapes.add('spread');
     localStorage.setItem(STORE.optimizeShapes, JSON.stringify([...this.optimizeShapes]));
+  },
+  setOptimizeObjective(v) {
+    this.optimizeObjective = v === 'balance' ? 'balance' : 'floor';
+    localStorage.setItem(STORE.optimizeObjective, this.optimizeObjective);
   },
   setSkipLastOfThree(v) { this.skipLastOfThree = !!v; localStorage.setItem(STORE.skipLastOfThree, v ? '1' : '0'); },
   setSingleSmallMonthly(v) { this.singleSmallMonthly = !!v; localStorage.setItem(STORE.singleSmallMonthly, v ? '1' : '0'); },
@@ -2552,6 +2561,7 @@ const Sync = {
       roundSetAside: State.roundSetAside,
       rollActuals: State.rollActuals,
       optimizeShapes: [...State.optimizeShapes],
+      optimizeObjective: State.optimizeObjective,
       flexOverrides: State.flexOverrides,
       flexEditEnabled: State.flexEditEnabled,
       inlineEditCats: [...State.inlineEditCats],
@@ -2592,6 +2602,9 @@ const Sync = {
     if (p.sinkingFund && typeof p.sinkingFund === 'object') { State.sinkingFund = { ...State.sinkingFund, ...p.sinkingFund }; State.saveSinkingFund(); }
     if (typeof p.roundSetAside === 'boolean') { State.setRoundSetAside(p.roundSetAside); }
     if (typeof p.rollActuals === 'boolean') { State.setRollActuals(p.rollActuals); }
+    if (p.optimizeObjective === 'floor' || p.optimizeObjective === 'balance') {
+      State.setOptimizeObjective(p.optimizeObjective);
+    }
     if (Array.isArray(p.optimizeShapes)) {
       State.optimizeShapes = new Set(p.optimizeShapes);
       if (!State.optimizeShapes.has('spread')) State.optimizeShapes.add('spread');
@@ -3898,7 +3911,7 @@ function monthlyEquivFor(b) {
 
 // Payment-shape optimizer: pick the shape per category that maximizes
 // the smallest per-pay leftover across the next N pays.
-async function optimizeShapes(nPays = 26, onProgress) {
+async function optimizeShapes(nPays = 26, onProgress, opts = {}) {
   // Search space = user-allowed shapes (Settings). bi-monthly-rate stays
   // manual-only because it structurally under-allocates for normal monthly
   // bills; the safety net would reject it anyway.
@@ -3999,11 +4012,24 @@ async function optimizeShapes(nPays = 26, onProgress) {
   // 3. Lowest volatility (stdev)
   // 4. Fewest consecutive-tight pay pairs
   const EPS = 0.005; // half a cent
+  const objective = opts.objective === 'balance' ? 'balance' : 'floor';
   const cmp = (a, b) => {
     // Rejected combos never win against a valid one
     if (a.rejected && b.rejected) return 0;
     if (a.rejected) return -1;
     if (b.rejected) return 1;
+    if (objective === 'balance') {
+      // Evenness, but not at any price: a pay that can't cover its bills
+      // isn't balanced, it's broken, so a negative floor loses to any
+      // non-negative one no matter how choppy.
+      const aNeg = a.min < -EPS, bNeg = b.min < -EPS;
+      if (aNeg !== bNeg) return aNeg ? -1 : 1;
+      if (aNeg && bNeg) return a.min - b.min;
+      if (Math.abs(a.stdev - b.stdev) > EPS) return b.stdev - a.stdev; // lower is better
+      if (Math.abs(a.min - b.min) > EPS) return a.min - b.min;
+      if (Math.abs(a.avg - b.avg) > EPS) return a.avg - b.avg;
+      return b.consecTight - a.consecTight;
+    }
     if (Math.abs(a.min - b.min) > EPS) return a.min - b.min;
     if (Math.abs(a.avg - b.avg) > EPS) return a.avg - b.avg;
     if (Math.abs(a.stdev - b.stdev) > EPS) return b.stdev - a.stdev; // lower is better
@@ -4016,11 +4042,223 @@ async function optimizeShapes(nPays = 26, onProgress) {
   const currentResult = evalCombo(currentCombo);
 
   let best = { combo: { ...currentCombo }, result: currentResult };
+  let fullStats = null;
   const N = cats.length;
   const totalCombos = Math.pow(shapes.length, N);
   const CAP = 20000;
 
-  if (totalCombos <= CAP) {
+  /* ---------------------------- Full auto ----------------------------
+     A true brute force is out of reach: eight categories over seven shapes is
+     5,764,801 allocations at ~9ms each, roughly fifteen hours. The greedy
+     fallback that takes over past five categories is cheap but start-
+     dependent — six different starting points on one real book landed
+     anywhere between $197 and $282 of worst-pay leftover, and the one it
+     actually uses (your current settings) was not the best of them.
+
+     What makes a third option possible: six of the seven shapes are perfectly
+     additive across categories. A category's per-pay contribution under those
+     shapes does not depend on what the other categories are set to — verified
+     to the cent over twenty random combinations. weighted-spread is the lone
+     exception, because it weights against the whole book at once.
+
+     So: map the additive space exactly by summing precomputed per-category
+     vectors (1.7M combinations in well under a second), take the best few as
+     starting points, and hill-climb each with real allocations over the full
+     shape set, weighted-spread included.
+
+     Phase 1 is only a seed generator. Every combination it proposes is
+     re-scored by a real allocation before it can win, and `best` starts at
+     the current settings — so if additivity ever breaks (the sinking fund in
+     '% of leftover' mode couples everything), the seeds are merely less well
+     chosen, never wrong, and the result can never be worse than today's. */
+  if (opts.full) {
+    const ADDITIVE = shapes.filter((s) => s !== 'weighted-spread');
+    const nP = payDates.length;
+    const inc = new Float64Array(nP);
+    for (let k = 0; k < nP; k++) inc[k] = incomeFor(payDates[k]);
+    const keep = [];
+    const K = 6;
+
+    if (ADDITIVE.length >= 2 && cats.length >= 2) {
+      // The sinking fund is injected into every allocation regardless of
+      // category, so summing per-category sub-runs would count it once per
+      // category. Measure it on its own and subtract it back out.
+      State.catShape = originalShape;
+      const fundVec = computeAllocations([], payDates).perPaycheck.map((x) => x.total);
+
+      // table[c][s] = { vec, ok } — ok is whether that category's own bills
+      // stay funded under that shape. Feasibility is a property of the single
+      // category, since a bill is only ever funded by its own category's run.
+      const table = [];
+      for (const cat of cats) {
+        const key = catSet.get(cat);
+        const sub = State.bills.filter((b) => b && !b.archived && Number(b.amount) > 0 && catFor(b) === cat);
+        const row = [];
+        for (const sh of ADDITIVE) {
+          const next = { ...originalShape };
+          if (!sh || sh === 'spread') delete next[key]; else next[key] = sh;
+          State.catShape = next;
+          const { perPaycheck } = computeAllocations(sub, payDates);
+          const vec = new Float64Array(nP);
+          for (let k = 0; k < nP; k++) vec[k] = (perPaycheck[k] ? perPaycheck[k].total : 0) - fundVec[k];
+          const got = {};
+          for (const pp of perPaycheck) for (const it of pp.items) got[it.billId] = (got[it.billId] || 0) + it.amount;
+          let ok = true;
+          for (const b of sub) {
+            const need = obligationByBill[b.id] || 0;
+            if (need <= 0) continue;
+            if ((got[b.id] || 0) < need - Math.max(need * 0.005, 5)) { ok = false; break; }
+          }
+          row.push({ vec, ok });
+        }
+        // If nothing clears the safety net for this category, don't rule the
+        // category out of the map entirely — let the real pass judge it.
+        if (!row.some((x) => x.ok)) for (const x of row) x.ok = true;
+        table.push(row);
+      }
+      State.catShape = originalShape;
+
+      const allowedIdx = table.map((row) => row.map((x, i) => (x.ok ? i : -1)).filter((i) => i >= 0));
+      let space = 1;
+      for (const a of allowedIdx) space *= a.length;
+
+      const acc = new Float64Array(nP);
+      const wantStdev = objective === 'balance';
+      const rankOf = () => {
+        let mn = Infinity, sum = 0;
+        for (let k = 0; k < nP; k++) { const L = inc[k] - acc[k]; if (L < mn) mn = L; sum += L; }
+        if (!wantStdev) return mn;
+        // Balance: an underwater combination is ranked by how underwater it
+        // is, so the map still prefers climbing out before smoothing.
+        if (mn < 0) return -1e9 + mn;
+        const avg = sum / nP;
+        let va = 0;
+        for (let k = 0; k < nP; k++) { const d = (inc[k] - acc[k]) - avg; va += d * d; }
+        return -Math.sqrt(va / nP);
+      };
+      let worstKept = -Infinity;
+      const consider = (cur, rk) => {
+        const idxArr = cur.map((pIdx, c) => allowedIdx[c][pIdx]);
+        for (let i = 0; i < keep.length; i++) {
+          let diff = 0;
+          for (let c = 0; c < idxArr.length; c++) if (idxArr[c] !== keep[i].idx[c]) diff++;
+          // Near-identical starts climb to the same place, so they're not
+          // worth a second climb — keep only the better of the pair.
+          if (diff < 2) {
+            if (rk > keep[i].rk) keep[i] = { idx: idxArr, rk };
+            keep.sort((a, b) => b.rk - a.rk);
+            worstKept = keep.length >= K ? keep[keep.length - 1].rk : -Infinity;
+            return;
+          }
+        }
+        keep.push({ idx: idxArr, rk });
+        keep.sort((a, b) => b.rk - a.rk);
+        if (keep.length > K) keep.length = K;
+        worstKept = keep.length >= K ? keep[keep.length - 1].rk : -Infinity;
+      };
+
+      const ENUM_CAP = 4e6;
+      if (space <= ENUM_CAP) {
+        const cur = new Array(cats.length).fill(0);
+        let tried = 0;
+        while (true) {
+          acc.set(fundVec);
+          for (let c = 0; c < cats.length; c++) {
+            const v = table[c][allowedIdx[c][cur[c]]].vec;
+            for (let k = 0; k < nP; k++) acc[k] += v[k];
+          }
+          const rk = rankOf();
+          if (keep.length < K || rk > worstKept) consider(cur, rk);
+          tried++;
+          if (onProgress && tried % 100000 === 0) {
+            onProgress({ phase: 'map', tried, total: space });
+            await yieldNow();
+          }
+          let k2 = cats.length - 1;
+          while (k2 >= 0) { cur[k2]++; if (cur[k2] < allowedIdx[k2].length) break; cur[k2] = 0; k2--; }
+          if (k2 < 0) break;
+        }
+        if (onProgress) { onProgress({ phase: 'map', tried, total: space }); await yieldNow(); }
+      } else {
+        // Too many even to sum: random-restart climbing in the same vector
+        // space. Still microseconds an evaluation, so hundreds of restarts
+        // cost less than a single real allocation.
+        const cur = new Array(cats.length).fill(0);
+        const fill = () => { acc.set(fundVec); for (let c = 0; c < cats.length; c++) { const v = table[c][allowedIdx[c][cur[c]]].vec; for (let k = 0; k < nP; k++) acc[k] += v[k]; } };
+        for (let restart = 0; restart < 400; restart++) {
+          for (let c = 0; c < cats.length; c++) cur[c] = Math.floor(Math.random() * allowedIdx[c].length);
+          fill();
+          let curRk = rankOf(), moved = true;
+          while (moved) {
+            moved = false;
+            for (let c = 0; c < cats.length; c++) {
+              const was = cur[c];
+              for (let o = 0; o < allowedIdx[c].length; o++) {
+                if (o === was) continue;
+                cur[c] = o; fill();
+                const rk = rankOf();
+                if (rk > curRk) { curRk = rk; moved = true; } else { cur[c] = was; }
+              }
+            }
+          }
+          consider(cur, curRk);
+          if (onProgress && restart % 40 === 0) { onProgress({ phase: 'map', tried: restart, total: 400 }); await yieldNow(); }
+        }
+      }
+      State.catShape = originalShape;
+    }
+
+    // Phase 2 — real allocations, now with the coupled shape back in play.
+    const comboFrom = (idxArr) => {
+      const o = {};
+      cats.forEach((c, i) => { o[c] = ADDITIVE[idxArr[i]]; });
+      return o;
+    };
+    const starts = keep.map((k) => comboFrom(k.idx));
+    starts.push({ ...currentCombo });
+    for (let t = 0; t < 2; t++) {
+      const o = {};
+      for (const cat of cats) o[cat] = shapes[Math.floor(Math.random() * shapes.length)];
+      starts.push(o);
+    }
+    const keyOf = (c) => cats.map((x) => c[x]).join('|');
+    const seen = new Set();
+    const deadline = performance.now() + (Number(opts.budgetMs) || 10000);
+    // Always finish the first climb, however slow the device — a result from
+    // one good starting point still beats no result. After that the clock wins.
+    const outOfTime = () => climbs > 0 && performance.now() > deadline;
+    let climbs = 0, evals = 0;
+    for (const start of starts) {
+      if (outOfTime()) break;
+      const sk = keyOf(start);
+      if (seen.has(sk)) continue;
+      seen.add(sk);
+      let cur = { ...start };
+      let curR = evalCombo(cur); evals++;
+      let improved = true;
+      while (improved) {
+        improved = false;
+        for (const cat of cats) {
+          if (outOfTime()) { improved = false; break; }
+          const orig = cur[cat];
+          for (const sh of shapes) {
+            if (sh === orig) continue;
+            const trial = { ...cur, [cat]: sh };
+            const r = evalCombo(trial); evals++;
+            if (cmp(r, curR) > 0) { cur = trial; curR = r; improved = true; }
+          }
+          if (onProgress) {
+            onProgress({ phase: 'climb', climb: climbs + 1, starts: starts.length, evals, bestMin: best.result.min });
+            await yieldNow();
+          }
+        }
+        if (outOfTime()) break;
+      }
+      if (cmp(curR, best.result) > 0) best = { combo: { ...cur }, result: curR };
+      climbs++;
+    }
+    fullStats = { seeds: keep.length, climbs, evals };
+  } else if (totalCombos <= CAP) {
     // Exhaustive brute force — iterative so we can yield.
     const idx = new Array(N).fill(0);
     let done = false;
@@ -4084,8 +4322,10 @@ async function optimizeShapes(nPays = 26, onProgress) {
     current: currentResult,
     best: best.result,
     combo: best.combo,
-    method: totalCombos <= CAP ? 'exhaustive' : 'greedy',
-    combosTried: totalCombos <= CAP ? totalCombos : null,
+    method: opts.full ? 'full auto' : (totalCombos <= CAP ? 'exhaustive' : 'greedy'),
+    combosTried: (!opts.full && totalCombos <= CAP) ? totalCombos : null,
+    fullStats,
+    objective,
     nPays
   };
 }
@@ -4101,15 +4341,19 @@ const SHAPE_LABELS = {
   'monthly-rate': 'Monthly rate'
 };
 
-async function runOptimizeShapes() {
-  const btn = document.getElementById('optimize-shapes');
+async function runOptimizeShapes(opts = {}) {
+  const btn = document.getElementById(opts.full ? 'full-auto-shapes' : 'optimize-shapes');
+  const otherBtn = document.getElementById(opts.full ? 'optimize-shapes' : 'full-auto-shapes');
   const originalBtnText = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = 'Optimizing…'; }
+  if (btn) { btn.disabled = true; btn.textContent = opts.full ? 'Searching…' : 'Optimizing…'; }
+  if (otherBtn) otherBtn.disabled = true;
+  const objective = State.optimizeObjective === 'balance' ? 'balance' : 'floor';
+  const goalText = objective === 'balance' ? 'evening out the paychecks' : 'lifting the smallest paycheck';
 
   // Progress modal
   let progressEl = null;
   openModal(`
-    <div class="modal-header"><h3>Optimizing…</h3></div>
+    <div class="modal-header"><h3>${opts.full ? 'Full auto' : 'Optimizing'}…</h3></div>
     <div class="modal-body">
       <div style="display:flex; align-items:center; gap:12px;">
         <div class="spinner" aria-hidden="true"></div>
@@ -4119,6 +4363,7 @@ async function runOptimizeShapes() {
         <div id="opt-progress-fill" style="height:100%; width:0%; background:var(--good); transition: width 120ms linear;"></div>
       </div>
       <div id="opt-progress-meta" class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:8px;">&nbsp;</div>
+      <div class="hint" style="font-size:11px; color:var(--ink-muted); margin-top:6px;">Aiming at ${goalText}.</div>
     </div>
   `, {
     onMount(el) { progressEl = el; }
@@ -4138,6 +4383,15 @@ async function runOptimizeShapes() {
       if (text) text.textContent = `Refining (pass ${p.pass})… ${p.tried.toLocaleString()} trials`;
       if (fill) fill.style.width = '100%';
       if (meta) meta.textContent = `Best min leftover so far: ${fmtUSD.format(p.bestMin)}`;
+    } else if (p.phase === 'map') {
+      const pct = p.total ? Math.min(100, Math.round((p.tried / p.total) * 100)) : 0;
+      if (text) text.textContent = `Mapping every combination… ${p.tried.toLocaleString()} / ${p.total.toLocaleString()}`;
+      if (fill) fill.style.width = pct + '%';
+      if (meta) meta.textContent = 'Finding the most promising starting points.';
+    } else if (p.phase === 'climb') {
+      if (text) text.textContent = `Testing start ${p.climb} of ${p.starts}… ${p.evals.toLocaleString()} allocations`;
+      if (fill) fill.style.width = Math.min(100, Math.round((p.climb / p.starts) * 100)) + '%';
+      if (meta) meta.textContent = `Best min leftover so far: ${fmtUSD.format(p.bestMin)}`;
     }
   };
 
@@ -4156,9 +4410,10 @@ async function runOptimizeShapes() {
   let r;
   try {
     Sync.suspended = true;
-    r = await optimizeShapes(26, setProgress);
+    r = await optimizeShapes(26, setProgress, { ...opts, objective });
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = originalBtnText; }
+    if (otherBtn) otherBtn.disabled = false;
     document.querySelector('.modal-backdrop')?.remove();
     alert('Optimize failed: ' + e.message);
     return;
@@ -4172,6 +4427,7 @@ async function runOptimizeShapes() {
   // Close the progress modal
   document.querySelector('.modal-backdrop')?.remove();
   if (btn) { btn.disabled = false; btn.textContent = originalBtnText; }
+  if (otherBtn) otherBtn.disabled = false;
 
   if (r.error) { alert(r.error); return; }
   const anyChange = r.changes.some((c) => c.changed);
@@ -4182,12 +4438,12 @@ async function runOptimizeShapes() {
 
   openModal(`
     <div class="modal-header">
-      <h3>Optimize payment shapes</h3>
+      <h3>${opts.full ? 'Full auto' : 'Optimize payment shapes'}</h3>
       <button class="btn btn-ghost" data-x="close" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">
       <div class="hint" style="font-size:12px; color:var(--ink-muted); margin-bottom:12px;">
-        Analyzed ${r.cats.length} categor${r.cats.length === 1 ? 'y' : 'ies'} across the next ${r.nPays} pays via ${r.method}${r.combosTried ? ` (${r.combosTried.toLocaleString()} combos)` : ''}.
+        Analyzed ${r.cats.length} categor${r.cats.length === 1 ? 'y' : 'ies'} across the next ${r.nPays} pays via ${r.method}${r.combosTried ? ` (${r.combosTried.toLocaleString()} combos)` : ''}${r.fullStats ? ` — ${r.fullStats.seeds} starting point${r.fullStats.seeds === 1 ? '' : 's'} mapped, ${r.fullStats.climbs} searched, ${r.fullStats.evals.toLocaleString()} allocations` : ''}. Aimed at ${r.objective === 'balance' ? 'evening out the paychecks' : 'lifting the smallest paycheck'}.
       </div>
       <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
         <div class="card" style="padding:10px;">
@@ -4205,7 +4461,7 @@ async function runOptimizeShapes() {
         <div class="card" style="padding:10px;">
           <div class="label" style="font-size:11px;">Volatility (stdev)</div>
           <div class="value" style="font-size:14px;">${fmtUSD.format(r.current.stdev)} → <b>${fmtUSD.format(r.best.stdev)}</b></div>
-          <div class="hint" style="font-size:11px; color:${r.best.stdev <= r.current.stdev ? 'var(--good)' : 'var(--danger)'};">lower = smoother pays</div>
+          <div class="hint" style="font-size:11px; color:${r.best.stdev <= r.current.stdev ? 'var(--good)' : 'var(--danger)'};">lower = smoother pays${r.objective === 'balance' ? ' · the goal' : ''}</div>
         </div>
         <div class="card" style="padding:10px;">
           <div class="label" style="font-size:11px;">Back-to-back tight pays</div>
@@ -5383,8 +5639,24 @@ route('settings', (root) => {
           <h2 style="margin:0;">Payment shape</h2>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
             ${State.catShapePrev ? `<button class="btn" id="revert-shapes" title="Restore your shape settings from ${State.catShapePrevAt ? new Date(State.catShapePrevAt).toLocaleString() : ''}">Revert to pre-optimize</button>` : ''}
-            <button class="btn" id="optimize-shapes" title="Try every combination of shapes and pick the one with the biggest smallest-per-pay leftover">Optimize</button>
+            <button class="btn" id="optimize-shapes" title="One quick pass from your current settings">Optimize</button>
+            <button class="btn btn-primary" id="full-auto-shapes" title="Map every additive combination, then search the best starting points with real allocations">Full auto</button>
           </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px;">
+          <label for="opt-objective" style="margin:0; font-size:11px;">Goal</label>
+          <select id="opt-objective" style="width:auto; flex:1 1 200px;">
+            <option value="floor" ${State.optimizeObjective !== 'balance' ? 'selected' : ''}>Lift the smallest paycheck</option>
+            <option value="balance" ${State.optimizeObjective === 'balance' ? 'selected' : ''}>Even out the paychecks</option>
+          </select>
+        </div>
+        <div class="hint" style="font-size:11px; color:var(--ink-muted); margin:6px 0 0 0;">
+          ${State.optimizeObjective === 'balance'
+            ? 'Smooths leftover across pays, but never at the cost of a paycheck that cannot cover its bills.'
+            : 'Makes the worst paycheck of the run as comfortable as possible, even if the others vary.'}
+        </div>
+        <div class="hint" style="font-size:11px; color:var(--ink-muted); margin:6px 0 0 0;">
+          <strong>Optimize</strong> is one quick pass from your current settings. <strong>Full auto</strong> searches far harder from many starting points — a few seconds, and it finds more. Details in Help.
         </div>
         ${State.catShapePrev ? `<div class="hint" style="font-size:11px; color:var(--ink-muted); margin:6px 0 0 0;">A snapshot from ${State.catShapePrevAt ? new Date(State.catShapePrevAt).toLocaleString() : 'earlier'} is saved. Revert restores it.</div>` : ''}
         <div class="hint" style="font-size:12px; color:var(--ink-muted); margin:8px 0 10px 0;">How each category's bills are spread across paychecks in a cycle.</div>
@@ -5565,7 +5837,9 @@ route('settings', (root) => {
       </div>
       <div class="card">
         <h2>Optimize button</h2>
-        <p style="color:var(--ink-soft);">The <strong>Optimize</strong> button on the Payment shape card tries every combination of shapes across your categories and picks the one with the biggest smallest-per-pay leftover, then the biggest average, then the lowest volatility, then the fewest back-to-back tight pays.</p>
+        <p style="color:var(--ink-soft);">The Payment shape card has two search buttons and a <strong>Goal</strong> selector. The goal decides what "better" means: <em>Lift the smallest paycheck</em> ranks by the biggest smallest-per-pay leftover, then average, then volatility, then fewest back-to-back tight pays. <em>Even out the paychecks</em> ranks by lowest volatility instead — but a combination that leaves any paycheck unable to cover its bills always loses to one that doesn't, however smooth it looks.</p>
+        <p style="color:var(--ink-soft);"><strong>Optimize</strong> makes one pass from your current settings. Up to five categories that's genuinely every combination; past that it's a single hill-climb, which is quick but can stop somewhere nothing immediately nearby beats.</p>
+        <p style="color:var(--ink-soft);"><strong>Full auto</strong> exists because that single climb is start-dependent — on a real eight-category book, six different starting points landed between $197 and $282 of worst-pay leftover, and the one Optimize uses wasn't the best. It works in two phases. Six of the seven shapes turn out to be additive: a category's contribution to each paycheck doesn't depend on what the other categories are set to. That lets it score roughly 1.7 million combinations in about a second by adding precomputed numbers instead of recalculating. Those are only candidates — it then re-runs the best handful as real allocations, with <em>Weighted spread</em> (the one shape that doesn't decompose) back in play, and climbs from each. A few seconds, and it can never return something worse than your current settings.</p>
         <ul style="color:var(--ink-soft); padding-left:20px; margin:0; line-height:1.6;">
           <li>Combos that under-fund any bill (short by more than $5 or 0.5%) are rejected.</li>
           <li>Progress modal shows a running count and the best min leftover found so far.</li>
@@ -5785,6 +6059,15 @@ route('settings', (root) => {
   });
   const optimizeBtn = $('#optimize-shapes');
   if (optimizeBtn) optimizeBtn.onclick = () => runOptimizeShapes();
+  const fullAutoBtn = $('#full-auto-shapes');
+  if (fullAutoBtn) fullAutoBtn.onclick = () => runOptimizeShapes({ full: true });
+  const objectiveEl = $('#opt-objective');
+  if (objectiveEl) objectiveEl.onchange = (e) => {
+    State.setOptimizeObjective(e.target.value);
+    const y = window.scrollY;
+    navigate();
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  };
   $$('.opt-shape-allow').forEach((el) => {
     el.onchange = () => { State.setOptimizeShapeAllowed(el.dataset.shape, el.checked); };
   });
@@ -6551,7 +6834,7 @@ State.load();
 try { State.pruneCellOverridesMaskingCredits(); } catch {}
 
 // Wire State mutations to trigger Supabase push (debounced inside Sync.push).
-['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled','saveSinkingFund','updateSinkingFund'].forEach((k) => {
+['saveBills','setCatOrder','setBillOrder','setSchedCount','setPayAmount','setPayStart','setFrequency','setTheme','setShowZeroBills','setSkipLastOfThree','setSingleSmallMonthly','setSingleSmallThreshold','setSingleSubscription','toggleSinglePayCat','setSubsMonthlyBatch','toggleBatchMonthlyCat','setCatShape','setCellCreditEnabled','setCellCredit','setLeftoverMonths','setOnboarded','persistCollapsed','saveIncomes','addIncome','updateIncome','removeIncome','addIncomeChange','removeIncomeChange','setDueSoonEnabled','setDueSoonDays','setDueSoonCat','setYearViewEnabled','setRoundSetAside','setOptimizeShapeAllowed','setOptimizeObjective','setFlexOverride','setFlexEditEnabled','setInlineEditCat','setLeftoverViewEnabled','saveSinkingFund','updateSinkingFund'].forEach((k) => {
   if (typeof State[k] !== 'function') return;
   const orig = State[k].bind(State);
   State[k] = (...args) => { const r = orig(...args); try { Sync.push(); } catch {} return r; };
