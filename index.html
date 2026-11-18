@@ -2033,8 +2033,16 @@ const State = {
     this.cellCreditEnabled = localStorage.getItem(STORE.cellCreditEnabled) === '1';
     try { this.cellCredits = JSON.parse(localStorage.getItem(STORE.cellCredits) || '{}') || {}; }
     catch { this.cellCredits = {}; }
-    const lm = parseInt(localStorage.getItem(STORE.leftoverMonths) || '6', 10);
-    this.leftoverMonths = [6, 12].includes(lm) ? lm : 6;
+    // Leftover window: 6 or 12 (rolling months from today) or the string modes
+    // 'this-year' / 'next-year' (a calendar year). Stored as a string either
+    // way, so parse before deciding which kind it is.
+    const lmRaw = String(localStorage.getItem(STORE.leftoverMonths) || '6');
+    if (lmRaw === 'this-year' || lmRaw === 'next-year') {
+      this.leftoverMonths = lmRaw;
+    } else {
+      const lm = parseInt(lmRaw, 10);
+      this.leftoverMonths = [6, 12].includes(lm) ? lm : 6;
+    }
     try { this.batchMonthlyCats = new Set((JSON.parse(localStorage.getItem(STORE.batchMonthlyCats) || '[]') || []).map((s) => String(s).toLowerCase())); }
     catch { this.batchMonthlyCats = new Set(); }
     // Migrate legacy subsMonthlyBatch boolean
@@ -2203,7 +2211,11 @@ const State = {
     }
     return removed;
   },
-  setLeftoverMonths(n) { this.leftoverMonths = n; localStorage.setItem(STORE.leftoverMonths, String(n)); },
+  setLeftoverMonths(n) {
+    const v = (n === 'this-year' || n === 'next-year') ? n : ([6, 12].includes(Number(n)) ? Number(n) : 6);
+    this.leftoverMonths = v;
+    localStorage.setItem(STORE.leftoverMonths, String(v));
+  },
   toggleBatchMonthlyCat(cat, on) {
     const key = cat.toLowerCase();
     if (on) this.batchMonthlyCats.add(key); else this.batchMonthlyCats.delete(key);
@@ -2599,7 +2611,10 @@ const Sync = {
       State.cellCredits = { ...p.cellCredits };
       localStorage.setItem(STORE.cellCredits, JSON.stringify(State.cellCredits));
     }
-    if (typeof p.leftoverMonths === 'number') { State.setLeftoverMonths(p.leftoverMonths); }
+    if (typeof p.leftoverMonths === 'number'
+        || p.leftoverMonths === 'this-year' || p.leftoverMonths === 'next-year') {
+      State.setLeftoverMonths(p.leftoverMonths);
+    }
     if (Array.isArray(p.batchMonthlyCats)) {
       State.batchMonthlyCats = new Set(p.batchMonthlyCats.map((s) => String(s).toLowerCase()));
       localStorage.setItem(STORE.batchMonthlyCats, JSON.stringify([...State.batchMonthlyCats]));
@@ -3100,6 +3115,16 @@ function deleteBillWithUndo(bill, after) {
   });
 }
 
+/* Leftover-window label. Shared so the collapsed card and the expanded section
+   head can't drift apart. 'this-year' is deliberately the REST of the year —
+   a leftover forecast for a month that's already been paid out isn't one. */
+function leftoverSectionTitle(mode, rowCount) {
+  const y = new Date().getFullYear();
+  if (mode === 'this-year') return `Monthly leftover · rest of ${y}`;
+  if (mode === 'next-year') return `Monthly leftover · ${y + 1}`;
+  return `Monthly leftover · next ${rowCount} months`;
+}
+
 /* ------------------------- Views ------------------------- */
 route('dashboard', (root) => {
   let offset = 0;
@@ -3331,14 +3356,32 @@ route('dashboard', (root) => {
     ${
       (State.leftoverViewEnabled && State.incomes && State.incomes.some((i) => Number(i.amount) > 0))
         ? (State.isSectionCollapsed('leftover')
-          ? dashCollapsedCard('leftover', `Monthly leftover · next ${State.leftoverMonths} months`)
+          ? dashCollapsedCard('leftover', leftoverSectionTitle(State.leftoverMonths, State.leftoverMonths))
           : (() => {
-            const monthsToShow = State.leftoverMonths;
-            const spanCount = monthsToShow >= 12 ? 52 : 26;
+            const lvMode = State.leftoverMonths;
+            const lvYear = lvMode === 'this-year' || lvMode === 'next-year';
+            const lvToday = new Date(); lvToday.setHours(0, 0, 0, 0);
             const byMonth = new Map();
-            const startIdx = perPaycheck.findIndex((p) => p.payDate >= (new Date(new Date().setHours(0,0,0,0))));
-            const from = startIdx === -1 ? 0 : startIdx;
-            const window = perPaycheck.slice(from, from + spanCount);
+            let monthsToShow, window;
+            if (lvYear) {
+              // A calendar year is bounded by date, not by an offset from today:
+              // next year starts 12+ months out, so slicing N entries forward
+              // can't reach it. 'this-year' still starts at TODAY, not at the
+              // 1st — a paycheck already received and spent isn't leftover you
+              // still have, and counting it would make this card disagree with
+              // Year view and with the rolling 6/12 options on the same screen.
+              const yr = lvToday.getFullYear() + (lvMode === 'next-year' ? 1 : 0);
+              const from = lvMode === 'next-year' ? new Date(yr, 0, 1) : lvToday;
+              const to = new Date(yr + 1, 0, 1);
+              window = perPaycheck.filter((p) => p.payDate >= from && p.payDate < to);
+              monthsToShow = 12 - from.getMonth();
+            } else {
+              monthsToShow = lvMode;
+              const spanCount = monthsToShow >= 12 ? 52 : 26;
+              const startIdx = perPaycheck.findIndex((p) => p.payDate >= lvToday);
+              const from = startIdx === -1 ? 0 : startIdx;
+              window = perPaycheck.slice(from, from + spanCount);
+            }
             for (const p of window) {
               const key = p.payDate.getFullYear() + '-' + String(p.payDate.getMonth() + 1).padStart(2, '0');
               const label = p.payDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
@@ -3356,7 +3399,7 @@ route('dashboard', (root) => {
             const totalShort = totalLeft < 0;
             const totalPays = rows.reduce((s, r) => s + r.pays, 0);
             return `<div style="margin-bottom:16px;"><div class="card">
-              ${dashSectionHead('leftover', `Monthly leftover · next ${rows.length} months`)}
+              ${dashSectionHead('leftover', leftoverSectionTitle(lvMode, rows.length))}
               <table class="schedule leftover-table" style="min-width:0;">
                 <thead><tr><th>Month</th><th>Pays</th><th>Leftover</th></tr></thead>
                 <tbody>
@@ -5076,9 +5119,14 @@ route('settings', (root) => {
           </select>
         </div>
         <div style="margin-top:14px;">
-          <label>Monthly leftover view (months)</label>
+          <label for="leftover-months">Monthly leftover view</label>
           <select id="leftover-months">
-            ${[6,12].map((n) => `<option value="${n}" ${n===State.leftoverMonths?'selected':''}>${n}</option>`).join('')}
+            ${[
+              { v: 6, t: 'Next 6 months' },
+              { v: 12, t: 'Next 12 months' },
+              { v: 'this-year', t: `Rest of ${new Date().getFullYear()}` },
+              { v: 'next-year', t: `All of ${new Date().getFullYear() + 1}` },
+            ].map((o) => `<option value="${o.v}" ${o.v === State.leftoverMonths ? 'selected' : ''}>${o.t}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -5408,7 +5456,7 @@ route('settings', (root) => {
           <li><strong>Monthly leftover section</strong> (Views → Dashboard) — toggle the expandable per-month table on the Dashboard.</li>
           <li><strong>Round set-aside to nearest $1</strong> (Rules → Allocation rules) — cleaner numbers; per-bill-per-cycle totals still equal the exact bill amount.</li>
           <li><strong>Inline-edit Allocate on Dashboard</strong> (Views → Inline-edit categories) — per-category checklist. Enabled categories get an editable number input on each Dashboard breakdown row for the next pay; the override rolls through Year view and Monthly leftover.</li>
-          <li><strong>Monthly leftover view</strong> (Views → Display) — 6 or 12 months; also switches the year view's data window.</li>
+          <li><strong>Monthly leftover view</strong> (Views → Display) — next 6 or 12 months, the rest of this calendar year, or all of next year. Both year options stop at that December; the current month still counts only the paychecks from today forward, the same as the rolling options.</li>
         </ul>
       </div>
       <div class="card">
@@ -5504,7 +5552,10 @@ route('settings', (root) => {
   });
 
   $('#sched-count').onchange = (e) => { State.setSchedCount(parseInt(e.target.value, 10)); };
-  $('#leftover-months').onchange = (e) => { State.setLeftoverMonths(parseInt(e.target.value, 10)); };
+  $('#leftover-months').onchange = (e) => {
+    const v = e.target.value;
+    State.setLeftoverMonths(v === 'this-year' || v === 'next-year' ? v : parseInt(v, 10));
+  };
   const addIncomeBtn = $('#add-income');
   if (addIncomeBtn) addIncomeBtn.onclick = () => {
     const added = State.addIncome({
