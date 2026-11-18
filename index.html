@@ -1804,16 +1804,25 @@ function computeAllocations(bills, payDates, opts = {}) {
     });
     byBillCycle.forEach((entries) => {
       if (entries.length === 0) return;
-      const cycleTotal = entries.reduce((s, e) => s + e.item.amount, 0);
+      // A typed override is an instruction, not a suggestion. Rounding it to
+      // the nearest dollar changed the number the user entered — and because
+      // the inline input re-renders from the rounded amount, the next commit
+      // wrote that rounded number back as the override. The cents weren't
+      // just displayed wrong, they were destroyed. Round only what this pass
+      // computed; the overridden entries keep their exact amounts and are
+      // excluded from drift absorption too, since nothing may move them.
+      const entriesToRound = entries.filter((e) => !e.item.overridden);
+      if (entriesToRound.length === 0) return;
+      const cycleTotal = entriesToRound.reduce((s, e) => s + e.item.amount, 0);
       if (cycleTotal <= 0) return;
       const targetTotal = Math.round(cycleTotal);
-      const rounded = entries.map((e) => Math.round(e.item.amount));
+      const rounded = entriesToRound.map((e) => Math.round(e.item.amount));
       const drift = targetTotal - rounded.reduce((s, v) => s + v, 0);
       if (drift !== 0) {
         const maxIdx = rounded.indexOf(Math.max(...rounded));
         rounded[maxIdx] += drift;
       }
-      entries.forEach((e, k) => {
+      entriesToRound.forEach((e, k) => {
         const delta = rounded[k] - e.item.amount;
         perPaycheck[e.idx].total += delta;
         e.item.amount = rounded[k];
@@ -2705,6 +2714,11 @@ const Sync = {
   // Successes are coalesced so a burst of edits yields one confirmation;
   // failures are louder and longer, since those are the ones worth acting on.
   ready: false,
+  // Set while State is deliberately in a transient condition the cloud must
+  // not see: an Optimize probe combination, or the moment between wiping
+  // localStorage and reloading defaults. Edits still mark dirty, so nothing
+  // is lost — the operation re-pushes when it's finished.
+  suspended: false,
   _lastOkToast: 0,
   _lastErrToast: 0,
   notifySaved() {
@@ -2747,6 +2761,7 @@ const Sync = {
     if (typeof WhatIf !== 'undefined' && WhatIf.active) return;
     if (!ensureSb() || !this.user) return;
     this.markDirty();
+    if (this.suspended) return;
     if (!navigator.onLine) {
       this.setStatus('offline');
       if (this.ready && Date.now() - this._lastErrToast > 10000) {
@@ -2762,12 +2777,14 @@ const Sync = {
   // or closed, where the 800ms debounce would otherwise never fire.
   flush() {
     if (typeof WhatIf !== 'undefined' && WhatIf.active) return;
+    if (this.suspended) return;
     if (!this.isDirty()) return;
     clearTimeout(this.pushTimer);
     this._pushNow();
   },
   async _pushNow(opts = {}) {
     if (!ensureSb() || !this.user) return;
+    if (this.suspended) return;
     this.setStatus('syncing');
     try {
       // Stale-write guard: if the cloud row moved on from the version this
@@ -2812,6 +2829,16 @@ const Sync = {
   },
   // Overwrite the cloud with this device's data, ignoring the newer row.
   async forcePush() { await this._pushNow({ force: true }); },
+  // Delete the cloud row outright. Only "Clear everywhere" calls this, and it
+  // throws on failure so the caller can refuse to wipe the local copy when the
+  // cloud copy is still out there.
+  async deleteCloud() {
+    if (!ensureSb() || !this.user) throw new Error('not signed in');
+    const { error } = await sb.from('paycheck_data').delete().eq('user_id', this.user.id);
+    if (error) throw error;
+    this.setBase(null);
+    this.clearDirty();
+  },
   // Throw away this device's unpushed edits and take the cloud copy.
   async forcePull() {
     if (!ensureSb() || !this.user) return;
@@ -2991,6 +3018,85 @@ function confirmDialog(message, onYes) {
   return m;
 }
 
+// "Clear all data" wiped every STORE key and called State.load(), which
+// re-seeds the sample bills and calls saveBills() — a push-wrapped mutation.
+// The wipe had already removed syncBase, so _pushNow's stale-write guard
+// (`if (base)`) was skipped entirely and the sample bills were upserted
+// straight over the cloud row. For a signed-in user that row is the only
+// backup, and the button's text implied the wipe was local.
+// Two fixes: pushes are suspended across the wipe, and when signed in the two
+// possible meanings become two buttons instead of a guess.
+function wipeLocalData() {
+  const wasSuspended = Sync.suspended;
+  Sync.suspended = true;
+  try { clearTimeout(Sync.pushTimer); } catch {}
+  try { Object.values(STORE).forEach((k) => localStorage.removeItem(k)); } catch {}
+  State.load();
+  // State.load() re-seeded sample bills and marked the store dirty on the way
+  // through. That is not an edit worth preserving, let alone uploading.
+  try { Sync.clearDirty(); } catch {}
+  Sync.suspended = wasSuspended;
+}
+
+function openClearDataDialog() {
+  const signedIn = !!(typeof Sync !== 'undefined' && Sync.user);
+  if (!signedIn) {
+    confirmDialog('Permanently delete all bills and reset settings on this device?', () => {
+      wipeLocalData();
+      navigate();
+    });
+    return;
+  }
+  openModal(`
+    <div class="modal-header"><h3 class="serif">Clear all data</h3></div>
+    <div class="modal-body">
+      <p>You're signed in, so this could mean two different things.</p>
+      <p><strong>This device only</strong> — signs you out and clears this device. Your cloud copy is left alone, so signing back in brings everything back.</p>
+      <p><strong>Everywhere</strong> — also deletes the cloud copy. Nothing on any device can bring it back.</p>
+      <p style="color:var(--ink-soft);">Either way, Export JSON first if there is any chance you'll want this data again.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-x="cancel">Cancel</button>
+      <button class="btn" data-x="local">This device only</button>
+      <button class="btn btn-danger" data-x="all">Everywhere</button>
+    </div>
+  `, {
+    onMount(el, close) {
+      el.querySelector('[data-x="cancel"]').onclick = close;
+      el.querySelector('[data-x="local"]').onclick = async () => {
+        close();
+        Sync.suspended = true;
+        // Sign out BEFORE the wipe. push() no-ops without a user, so even if
+        // the suspend flag were missed the re-seed can't reach the cloud.
+        try { await Sync.signOut(); } catch {}
+        Sync.user = null;
+        wipeLocalData();
+        Sync.suspended = false;
+        navigate();
+        showToast('Cleared on this device. Your cloud copy is untouched.', { duration: 5000 });
+      };
+      el.querySelector('[data-x="all"]').onclick = async () => {
+        close();
+        Sync.suspended = true;
+        try {
+          await Sync.deleteCloud();
+        } catch (e) {
+          // Wiping locally now would leave the cloud copy as the only survivor
+          // and the next launch would pull it straight back — the opposite of
+          // what was asked. Change nothing and say so.
+          Sync.suspended = false;
+          showToast(`Couldn't delete the cloud copy (${escapeHtml(e.message || 'no connection')}) — nothing was cleared. Try again when you're online.`, { duration: 7000 });
+          return;
+        }
+        wipeLocalData();
+        Sync.suspended = false;
+        navigate();
+        showToast('Cleared on this device and in the cloud.', { duration: 5000 });
+      };
+    }
+  });
+}
+
 // Shown when a push would overwrite a newer row written by another device.
 // Deliberately offers no "merge" — the payload is a single blob, so the only
 // honest options are keep mine or take theirs.
@@ -3049,6 +3155,30 @@ const pendingInputCommits = new Set();
 function flushPendingInputCommits() {
   for (const commit of [...pendingInputCommits]) { try { commit(); } catch {} }
   pendingInputCommits.clear();
+}
+// Persist after a pause in typing as well as on blur, without re-rendering
+// (that would steal focus mid-edit). An input wired only to 'change' needs a
+// blur to save: type a value, then scroll away, screenshot it or switch apps,
+// and iOS can freeze the page with the edit on screen but never stored. The
+// pending commit is registered so the visibilitychange / pagehide hooks can
+// force it through.
+function commitWhileTyping(inp, save) {
+  let timer = null;
+  const commit = () => {
+    clearTimeout(timer);
+    timer = null;
+    pendingInputCommits.delete(commit);
+    try { save(); } catch {}
+  };
+  inp.addEventListener('input', () => {
+    clearTimeout(timer);
+    pendingInputCommits.add(commit);
+    timer = setTimeout(commit, 600);
+  });
+  // Blur must COMMIT, not cancel. 'change' only fires when the value differs
+  // from focus time and never fires at all if a re-render pulls the focused
+  // input out of the DOM, so discarding here silently dropped the edit.
+  inp.addEventListener('blur', commit);
 }
 
 /* ------------------------- Toasts ------------------------- */
@@ -3678,28 +3808,6 @@ route('dashboard', (root) => {
       try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch {}
     });
   };
-  // These inputs used to persist only on 'change', which needs a blur. Typing
-  // a value and then scrolling, screenshotting or switching apps left it on
-  // screen but unsaved — it looked entered and wasn't. Persist after a pause
-  // in typing too, without re-rendering (that would steal focus mid-edit).
-  const commitWhileTyping = (inp, save) => {
-    let timer = null;
-    const commit = () => {
-      clearTimeout(timer);
-      timer = null;
-      pendingInputCommits.delete(commit);
-      try { save(); } catch {}
-    };
-    inp.addEventListener('input', () => {
-      clearTimeout(timer);
-      pendingInputCommits.add(commit);
-      timer = setTimeout(commit, 600);
-    });
-    // Blur must COMMIT, not cancel. 'change' only fires when the value differs
-    // from focus time and never fires at all if a re-render pulls the focused
-    // input out of the DOM, so discarding here silently dropped the edit.
-    inp.addEventListener('blur', commit);
-  };
   root.querySelectorAll('.cell-credit-input').forEach((inp) => {
     selectAllOnFocus(inp);
     attachImpliedDecimal(inp);
@@ -4036,14 +4144,30 @@ async function runOptimizeShapes() {
   // Yield once so the loading modal paints before we start work
   await new Promise((r) => setTimeout(r, 30));
 
+  // The search assigns probe combinations straight onto State.catShape, and
+  // yields to the event loop between batches. Two ways a probe escaped:
+  // a throw anywhere in the search skipped optimizeShapes' own restore and
+  // left the probe installed, where the next setCatShape() would persist it;
+  // and a debounced sync push firing during a yield uploaded a probe as the
+  // user's real configuration. Restore unconditionally, and keep pushes
+  // frozen for the whole search.
+  const shapeBefore = { ...State.catShape };
+  const syncWasSuspended = Sync.suspended;
   let r;
   try {
+    Sync.suspended = true;
     r = await optimizeShapes(26, setProgress);
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = originalBtnText; }
     document.querySelector('.modal-backdrop')?.remove();
     alert('Optimize failed: ' + e.message);
     return;
+  } finally {
+    State.catShape = shapeBefore;
+    Sync.suspended = syncWasSuspended;
+    // An edit made just before Optimize would have marked dirty and then been
+    // held by the suspend. Let it go now.
+    if (!syncWasSuspended) { try { if (Sync.isDirty()) Sync.push(); } catch {} }
   }
   // Close the progress modal
   document.querySelector('.modal-backdrop')?.remove();
@@ -5389,7 +5513,7 @@ route('settings', (root) => {
           <button class="btn" id="reset-cat-order">Reset category order</button>
           <button class="btn btn-danger" id="clear-all">Clear all data</button>
         </div>
-        <div class="hint" style="margin-top:10px;color:var(--ink-muted);font-size:12px;">Bills are stored in your browser. Use Export regularly as a backup.</div>
+        <div class="hint" style="margin-top:10px;color:var(--ink-muted);font-size:12px;">Bills are stored in your browser${(typeof Sync !== "undefined" && Sync.user) ? ", and synced to your account" : ""}. Use Export regularly as a backup.</div>
       </div>
       <div class="card">
         <h2>PDF report</h2>
@@ -5592,22 +5716,29 @@ route('settings', (root) => {
       const btn = row.querySelector('[data-toggle-income]');
       if (inc && btn) btn.innerHTML = incomeSummaryHtml(inc);
     };
+    // Income amount persisted only on 'change'. Typing a new paycheck figure
+    // and backgrounding the app before blurring lost it — and every forecast
+    // in the app is computed from that number.
+    const applyIncomeField = (inp) => {
+      const field = inp.dataset.f;
+      let val = inp.value;
+      if (field === 'amount') val = parseFloat(val) || 0;
+      const patch = { [field]: val };
+      State.updateIncome(id, patch);
+      // Keep legacy fields in sync from the FIRST income so old code still works
+      const incs = State.incomes;
+      if (incs && incs[0]) {
+        if (field === 'amount' && incs[0].id === id) State.setPayAmount(Number(val) || 0);
+        if (field === 'frequency' && incs[0].id === id) State.setFrequency(val);
+        if (field === 'payStart' && incs[0].id === id && val) State.setPayStart(val);
+      }
+      refreshSummary();
+    };
     row.querySelectorAll('[data-f]').forEach((inp) => {
-      inp.onchange = () => {
-        const field = inp.dataset.f;
-        let val = inp.value;
-        if (field === 'amount') val = parseFloat(val) || 0;
-        const patch = { [field]: val };
-        State.updateIncome(id, patch);
-        // Keep legacy fields in sync from the FIRST income so old code still works
-        const incs = State.incomes;
-        if (incs && incs[0]) {
-          if (field === 'amount' && incs[0].id === id) State.setPayAmount(Number(val) || 0);
-          if (field === 'frequency' && incs[0].id === id) State.setFrequency(val);
-          if (field === 'payStart' && incs[0].id === id && val) State.setPayStart(val);
-        }
-        refreshSummary();
-      };
+      if (inp.tagName === 'INPUT' && inp.type !== 'date') {
+        commitWhileTyping(inp, () => applyIncomeField(inp));
+      }
+      inp.onchange = () => applyIncomeField(inp);
     });
     const rm = row.querySelector('[data-x="remove"]');
     if (rm) rm.onclick = () => {
@@ -5688,23 +5819,33 @@ route('settings', (root) => {
     State.updateSinkingFund({ enabled: sinkEnable.checked });
     renavKeepScroll();
   };
+  // The fund's target, saved-so-far and % fields persisted only on 'change',
+  // so a typed target that never got a blur was lost on backgrounding.
+  const applySf = (inp, { autoEnable }) => {
+    const field = inp.dataset.sf;
+    let val = inp.value;
+    if (field === 'targetAmount' || field === 'savedSoFar') val = parseFloat(val) || 0;
+    if (field === 'percentOfLeftover') val = Math.max(0, Math.min(100, parseFloat(val) || 0));
+    const patch = { [field]: val };
+    // Auto-enable the fund once the fields required by its mode are set,
+    // so users don't fill everything in and see nothing happen. Only on a
+    // settled value: switching the fund on from a half-typed target ("2" of
+    // "2000") would start allocating against a number nobody meant.
+    const sf = { ...State.sinkingFund, ...patch };
+    if (autoEnable && !sf.enabled) {
+      const ready = sf.mode === 'leftover'
+        ? Number(sf.percentOfLeftover) > 0
+        : (Number(sf.targetAmount) > 0 && !!sf.targetDate);
+      if (ready) patch.enabled = true;
+    }
+    State.updateSinkingFund(patch);
+  };
   $$('[data-sf]').forEach((inp) => {
+    if (inp.tagName === 'INPUT' && inp.type !== 'date') {
+      commitWhileTyping(inp, () => applySf(inp, { autoEnable: false }));
+    }
     inp.onchange = () => {
-      const field = inp.dataset.sf;
-      let val = inp.value;
-      if (field === 'targetAmount' || field === 'savedSoFar') val = parseFloat(val) || 0;
-      if (field === 'percentOfLeftover') val = Math.max(0, Math.min(100, parseFloat(val) || 0));
-      const patch = { [field]: val };
-      // Auto-enable the fund once the fields required by its mode are set,
-      // so users don't fill everything in and see nothing happen.
-      const sf = { ...State.sinkingFund, ...patch };
-      if (!sf.enabled) {
-        const ready = sf.mode === 'leftover'
-          ? Number(sf.percentOfLeftover) > 0
-          : (Number(sf.targetAmount) > 0 && !!sf.targetDate);
-        if (ready) patch.enabled = true;
-      }
-      State.updateSinkingFund(patch);
+      applySf(inp, { autoEnable: true });
       renavKeepScroll();
     };
   });
@@ -5814,13 +5955,7 @@ route('settings', (root) => {
     State.resetCatOrder();
     navigate();
   };
-  $('#clear-all').onclick = () => {
-    confirmDialog('Permanently delete all bills and reset settings?', () => {
-      Object.values(STORE).forEach((k) => localStorage.removeItem(k));
-      State.load();
-      navigate();
-    });
-  };
+  $('#clear-all').onclick = () => openClearDataDialog();
   attachFab(false);
 });
 
