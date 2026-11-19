@@ -186,11 +186,12 @@
     min-width: 0;
   }
   .view-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; }
-  /* Masthead: app mark, then title over a one-line subtitle. The mark is the
-     same bars-and-marker language as icon.svg, drawn in theme tokens so it
-     reads in both themes instead of carrying its own dark tile. */
+  /* Masthead: app mark, then title over a one-line subtitle. The mark is
+     icon.svg itself rather than a redrawn copy, so the header can never drift
+     from the installed app icon. It is precached by the service worker, so it
+     is there offline too. */
   .view-header .hgroup { display: flex; align-items: center; gap: 12px; min-width: 0; }
-  .view-header .app-mark { width: 34px; height: 34px; flex: none; display: block; }
+  .view-header .app-mark { width: 38px; height: 38px; flex: none; display: block; border-radius: 9px; }
   .view-header .titles { min-width: 0; }
   .settings-tabs {
     display: flex;
@@ -255,7 +256,7 @@
       padding-bottom: 0;
     }
     .view-header .hgroup { gap: 10px; }
-    .view-header .app-mark { width: 30px; height: 30px; }
+    .view-header .app-mark { width: 34px; height: 34px; border-radius: 8px; }
     /* Two action buttons can squeeze a two-word title onto two lines, which
        breaks the masthead's shape. The title holds its line; the subtitle
        beneath it is what gives way. */
@@ -3289,12 +3290,7 @@ function leftoverSectionTitle(mode, rowCount) {
 function viewHeader(title, sub, actions = '') {
   return `<div class="view-header">
       <div class="hgroup">
-        <svg class="app-mark" viewBox="0 0 32 32" aria-hidden="true">
-          <rect x="2.5" y="16" width="7" height="13" rx="3" fill="var(--accent)" opacity="0.45"/>
-          <rect x="12.5" y="11" width="7" height="18" rx="3" fill="var(--accent)"/>
-          <rect x="22.5" y="9" width="7" height="20" rx="3" fill="var(--accent)"/>
-          <circle cx="26" cy="4" r="3" fill="var(--warn)"/>
-        </svg>
+        <img class="app-mark" src="icon.svg" alt="" width="38" height="38" />
         <div class="titles">
           <h1>${title}</h1>
           <div class="sub">${sub}</div>
