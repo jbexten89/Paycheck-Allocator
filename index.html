@@ -185,7 +185,13 @@
     margin: 0 auto;
     min-width: 0;
   }
-  .view-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; }
+  .view-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; }
+  /* Masthead: app mark, then title over a one-line subtitle. The mark is the
+     same bars-and-marker language as icon.svg, drawn in theme tokens so it
+     reads in both themes instead of carrying its own dark tile. */
+  .view-header .hgroup { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .view-header .app-mark { width: 34px; height: 34px; flex: none; display: block; }
+  .view-header .titles { min-width: 0; }
   .settings-tabs {
     display: flex;
     gap: 2px;
@@ -237,19 +243,29 @@
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
   .settings-section { display: none !important; }
   .settings-section.active { display: grid !important; }
-  .view-header .sub { color: var(--ink-muted); font-size: 13px; }
-  /* On a phone the header was costing 12-17% of the screen. The subtitle is
-     read once, and the tab bar already says which page you're on, so collapse
-     to a single title + action line. Desktop has the room and keeps both. */
+  .view-header h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; margin: 0 0 2px; }
+  .view-header .sub { color: var(--ink-muted); font-size: 14px; line-height: 1.25; }
+  /* On a phone the header still has to earn its height, so the subtitle shrinks
+     and clips to one line rather than disappearing — it is part of the
+     masthead's shape, and dropping it left the title floating alone. */
   @media (max-width: 768px) {
     .view-header {
-      align-items: center;
       gap: 12px;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
       padding-bottom: 0;
     }
-    .view-header .sub { display: none; }
-    .view-header h1 { font-size: 20px; margin: 0; }
+    .view-header .hgroup { gap: 10px; }
+    .view-header .app-mark { width: 30px; height: 30px; }
+    /* Two action buttons can squeeze a two-word title onto two lines, which
+       breaks the masthead's shape. The title holds its line; the subtitle
+       beneath it is what gives way. */
+    .view-header h1 { font-size: 22px; white-space: nowrap; }
+    .view-header .sub {
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     /* Keep the action from squeezing a long title onto two lines */
     .view-header > .row, .view-header > :last-child { flex: none; }
   }
@@ -3268,6 +3284,26 @@ function leftoverSectionTitle(mode, rowCount) {
   return `Monthly leftover · next ${rowCount} months`;
 }
 
+// The masthead every view opens with: app mark, title, one-line subtitle, and
+// whatever actions that view needs on the right.
+function viewHeader(title, sub, actions = '') {
+  return `<div class="view-header">
+      <div class="hgroup">
+        <svg class="app-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="2.5" y="16" width="7" height="13" rx="3" fill="var(--accent)" opacity="0.45"/>
+          <rect x="12.5" y="11" width="7" height="18" rx="3" fill="var(--accent)"/>
+          <rect x="22.5" y="9" width="7" height="20" rx="3" fill="var(--accent)"/>
+          <circle cx="26" cy="4" r="3" fill="var(--warn)"/>
+        </svg>
+        <div class="titles">
+          <h1>${title}</h1>
+          <div class="sub">${sub}</div>
+        </div>
+      </div>
+      ${actions}
+    </div>`;
+}
+
 /* ------------------------- Views ------------------------- */
 route('dashboard', (root) => {
   let offset = 0;
@@ -3297,13 +3333,8 @@ route('dashboard', (root) => {
   const avg = avgWindow.length ? totalAvgWindow / avgWindow.length : 0;
 
   root.innerHTML = `
-    <div class="view-header">
-      <div>
-        <h1>Dashboard</h1>
-        <div class="sub">An overview of your bills and the next paycheck.</div>
-      </div>
-      ${WhatIf.active ? '' : `<button class="btn" id="whatif-enter" style="white-space:nowrap;" title="Try changes to bills or income without saving">What if?</button>`}
-    </div>
+    ${viewHeader('Dashboard', 'Your bills and the next paycheck.',
+      WhatIf.active ? '' : `<button class="btn" id="whatif-enter" style="white-space:nowrap;" title="Try changes to bills or income without saving">What if?</button>`)}
 
     ${(() => {
       // Loud empty state: without a positive income amount every per-pay
@@ -4515,12 +4546,7 @@ route('bills', (root) => {
   const monthlyHigh = activeForTotal.reduce((s, b) => s + monthlyEquivFor(b.variable ? { ...b, amount: Math.max(Number(b.amountMin) || 0, Number(b.amountMax) || 0) } : b), 0);
 
   root.innerHTML = `
-    <div class="view-header">
-      <div>
-        <h1>Bills</h1>
-        <div class="sub">Your recurring monthly obligations.</div>
-      </div>
-      <div class="row" style="gap:8px;">
+    ${viewHeader('Bills', 'Your recurring monthly obligations.', `<div class="row" style="gap:8px;">
         ${
           // Nothing archived means the toggle does nothing — hide it rather
           // than offering a control that can't change what's on screen.
@@ -4528,8 +4554,7 @@ route('bills', (root) => {
             ? `<button class="btn" id="toggle-archived">${showArchNow ? 'Hide' : 'Show'} archived (${archivedCount})</button>`
             : ''
         }
-      </div>
-    </div>
+      </div>`)}
     <div class="bills-total-bar">
       <span class="bills-total-label">Monthly total</span>
       <span class="bills-total-amount">${fmtUSD.format(monthlyTotal)}</span>
@@ -5242,16 +5267,10 @@ route('schedule', (root) => {
     const colCount = perPaycheck.length + 2; // Bill + pay dates + Total
 
     root.innerHTML = `
-      <div class="view-header">
-        <div>
-          <h1>Pay Schedule</h1>
-          <div class="sub">Per-bill allocations across upcoming paychecks. Click a row for running balances.</div>
-        </div>
-        <div class="row" style="gap:8px;">
+      ${viewHeader('Pay Schedule', 'Per-bill allocations across upcoming paychecks. Click a row for running balances.', `<div class="row" style="gap:8px;">
           <button class="btn" id="sched-pdf">PDF</button>
           <button class="btn" id="sched-export">Export CSV</button>
-        </div>
-      </div>
+        </div>`)}
 
       ${
         billOrder.length === 0
@@ -5393,12 +5412,7 @@ route('settings', (root) => {
   // Migrate old 'general' tab id to 'setup'
   if (activeTab === 'general') activeTab = 'setup';
   root.innerHTML = `
-    <div class="view-header">
-      <div>
-        <h1>Settings</h1>
-        <div class="sub">Pay schedule, rules, sync, and data.</div>
-      </div>
-    </div>
+    ${viewHeader('Settings', 'Pay schedule, rules, sync, and data.')}
     <div class="settings-tabs">
       ${[
         ['setup',   'Setup'],
