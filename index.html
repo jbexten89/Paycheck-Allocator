@@ -256,7 +256,9 @@
       padding-bottom: 0;
     }
     .view-header .hgroup { gap: 10px; }
-    .view-header .app-mark { width: 34px; height: 34px; border-radius: 8px; }
+    /* The phone has no sidebar brand, so the mark is the only place the app
+       identifies itself — it carries more weight here than on desktop. */
+    .view-header .app-mark { width: 42px; height: 42px; border-radius: 10px; }
     /* Two action buttons can squeeze a two-word title onto two lines, which
        breaks the masthead's shape. The title holds its line; the subtitle
        beneath it is what gives way. */
